@@ -195,6 +195,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       builder: (context, model, child) {
         final showOneTime = model.approveMode != 'click' &&
             model.verificationMethod != kUsePermanentPassword;
+        // 临时密码只有在真正可用时才允许复制 / 分享：
+        // 非空、不是占位 '-'，也不在生成中（生成中显示 "Generating ..."）。
+        final pwdText = model.serverPasswd.text.trim();
+        final pwdReady = showOneTime &&
+            pwdText.isNotEmpty &&
+            pwdText != '-' &&
+            pwdText != translate('Generating ...');
         return Container(
           margin: const EdgeInsets.only(left: 16, right: 12, top: 12),
           padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
@@ -321,10 +328,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: showOneTime
+                onTap: pwdReady
                     ? () {
-                        Clipboard.setData(
-                            ClipboardData(text: model.serverPasswd.text));
+                        Clipboard.setData(ClipboardData(text: pwdText));
                         showToast(translate("Copied"));
                       }
                     : null,
@@ -365,9 +371,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () {
-                    final text = showOneTime
-                        ? 'ID: ${model.serverId.text} 密码: '
-                            '${model.serverPasswd.text}'
+                    final text = pwdReady
+                        ? 'ID: ${model.serverId.text} 密码: $pwdText'
                         : 'ID: ${model.serverId.text}';
                     Clipboard.setData(ClipboardData(text: text));
                     showToast(translate("Copied"));
