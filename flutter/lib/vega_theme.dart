@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 /// Vega 主题常量：浅色 / 深色两套配色，以及统一圆角。
 class VegaColors {
@@ -23,12 +23,9 @@ class VegaColors {
   // ---- 通用 ----
   static const double radius = 14.0;
 
-  /// 按当前亮度取一套配色。
+  /// 按当前主题亮度取一套配色（跟随 Theme.of(context)，而非系统亮度）。
   static VegaPalette of(BuildContext context) =>
-      VegaPalette(MediaQuery.maybeOf(context)?.platformBrightness ==
-              Brightness.dark
-          ? Brightness.dark
-          : Brightness.light);
+      VegaPalette(Theme.of(context).brightness);
 }
 
 /// 一套配色，便于按亮/暗切换时统一取值。
