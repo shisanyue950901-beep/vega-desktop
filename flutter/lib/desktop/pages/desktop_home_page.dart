@@ -251,8 +251,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 'ID',
                 style: TextStyle(fontSize: 11, color: palette.secondary),
               ),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
+              // Vega 修改：InkWell 可 Tab 聚焦、Enter/Space 触发复制，键盘用户也能单独复制 ID。
+              InkWell(
+                borderRadius: BorderRadius.circular(6),
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: model.serverId.text));
                   showToast(translate("Copied"));
@@ -462,45 +463,38 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   buildTip(BuildContext context) {
+    // Vega 修改：iOS 风格大标题 + 一行中文说明，替换上游 Your Desktop / desk_tip。
     final isOutgoingOnly = bind.isOutgoingOnly();
+    final palette = VegaColors.of(context);
     return Padding(
       padding:
-          const EdgeInsets.only(left: 20.0, right: 16, top: 16.0, bottom: 5),
+          const EdgeInsets.only(left: 20.0, right: 16, top: 18.0, bottom: 6),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            children: [
-              if (!isOutgoingOnly)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    translate("Your Desktop"),
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-            ],
-          ),
-          SizedBox(
-            height: 10.0,
-          ),
-          if (!isOutgoingOnly)
-            Text(
-              translate("desk_tip"),
-              overflow: TextOverflow.clip,
-              style: Theme.of(context).textTheme.bodySmall,
+          Text(
+            isOutgoingOnly ? '远程控制' : '远程协助',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+              color: palette.text,
             ),
-          if (isOutgoingOnly)
-            Text(
-              translate("outgoing_only_desk_tip"),
-              overflow: TextOverflow.clip,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            isOutgoingOnly
+                ? translate("outgoing_only_desk_tip")
+                : '把本设备 ID 和临时密码发给对方即可连接',
+            overflow: TextOverflow.clip,
+            style: TextStyle(fontSize: 12, height: 1.4, color: palette.secondary),
+          ),
         ],
       ),
     );
   }
+
 
   Widget buildHelpCards(String updateUrl) {
     if (kEnableUpstreamUpdateCheck &&
@@ -677,94 +671,102 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     }
 
+    // Vega 修改：安装提示改为 iOS 卡片（白底圆角 + 蓝色主按钮），替换上游粉色渐变块。
+    final palette = VegaColors.of(context);
     return Stack(
       children: [
         Container(
           margin: EdgeInsets.fromLTRB(
-              0, marginTop, 0, bind.isIncomingOnly() ? marginTop : 0),
-          child: Container(
-              decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  Color.fromARGB(255, 226, 66, 188),
-                  Color.fromARGB(255, 244, 114, 124),
+              16, marginTop, 16, bind.isIncomingOnly() ? marginTop : 12),
+          decoration: BoxDecoration(
+            color: palette.card,
+            borderRadius: BorderRadius.circular(palette.radius),
+            boxShadow: palette.isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    )
+                  ],
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: [
+                  Icon(Icons.shield_outlined, size: 16, color: palette.accent),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      title.isNotEmpty ? translate(title) : vegaCardTitle(content),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: palette.text,
+                      ),
+                    ),
+                  ),
                 ],
-              )),
-              padding: EdgeInsets.all(20),
-              child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: (title.isNotEmpty
-                          ? <Widget>[
-                              Center(
-                                  child: Text(
-                                translate(title),
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15),
-                              ).marginOnly(bottom: 6)),
-                            ]
-                          : <Widget>[]) +
-                      <Widget>[
-                        if (content.isNotEmpty)
-                          Text(
-                            translate(content),
-                            style: TextStyle(
-                                height: 1.5,
-                                color: Colors.white,
-                                fontWeight: FontWeight.normal,
-                                fontSize: 13),
-                          ).marginOnly(bottom: 20)
-                      ] +
-                      (btnText.isNotEmpty
-                          ? <Widget>[
-                              Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    FixedWidthButton(
-                                      width: 150,
-                                      padding: 8,
-                                      isOutline: true,
-                                      text: translate(btnText),
-                                      textColor: Colors.white,
-                                      borderColor: Colors.white,
-                                      textSize: 20,
-                                      radius: 10,
-                                      onTap: onPressed,
-                                    )
-                                  ])
-                            ]
-                          : <Widget>[]) +
-                      // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
-                      (help != null && link != null && kUpstreamDocsUrl.isNotEmpty
-                          ? <Widget>[
-                              Center(
-                                  child: InkWell(
-                                      onTap: () async =>
-                                          await launchUrl(Uri.parse(link!)),
-                                      child: Text(
-                                        translate(help),
-                                        style: TextStyle(
-                                            decoration:
-                                                TextDecoration.underline,
-                                            color: Colors.white,
-                                            fontSize: 12),
-                                      )).marginOnly(top: 6)),
-                            ]
-                          : <Widget>[]))),
+              ),
+              if (content.isNotEmpty)
+                Text(
+                  vegaCardBody(content),
+                  style: TextStyle(
+                    height: 1.45,
+                    fontSize: 12,
+                    color: palette.secondary,
+                  ),
+                ).marginOnly(top: 6),
+              if (btnText.isNotEmpty)
+                Material(
+                  color: palette.accent,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: onPressed,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      alignment: Alignment.center,
+                      child: Text(
+                        btnText == 'Install' ? '安装到本机' : translate(btnText),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ).marginOnly(top: 12),
+              // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
+              if (help != null && link != null && kUpstreamDocsUrl.isNotEmpty)
+                Center(
+                    child: InkWell(
+                        onTap: () async => await launchUrl(Uri.parse(link!)),
+                        child: Text(
+                          translate(help),
+                          style: TextStyle(
+                              decoration: TextDecoration.underline,
+                              color: palette.accent,
+                              fontSize: 12),
+                        )).marginOnly(top: 8)),
+            ],
+          ),
         ),
         if (closeButton != null && closeButton == true)
           Positioned(
-            top: 18,
-            right: 0,
+            top: marginTop + 2,
+            right: 18,
             child: IconButton(
               icon: Icon(
                 Icons.close,
-                color: Colors.white,
-                size: 20,
+                color: VegaColors.of(context).secondary,
+                size: 16,
               ),
               onPressed: closeCard,
             ),
@@ -1201,4 +1203,26 @@ void setPasswordDialog({VoidCallback? notEmptyCallback}) async {
       onCancel: close,
     );
   });
+}
+
+// Vega 修改：首页提示卡片的中文标题 / 正文（只覆盖 Vega 常见的两种，其余沿用上游翻译）。
+String vegaCardTitle(String content) {
+  switch (content) {
+    case 'install_tip':
+    case '':
+      return '安装到本机，连接更稳定';
+    case 'install_daemon_tip':
+      return '安装系统服务';
+    default:
+      return '提示';
+  }
+}
+
+String vegaCardBody(String content) {
+  switch (content) {
+    case 'install_tip':
+      return '当前是免安装运行，对方遇到管理员窗口或 UAC 弹窗会无法操作。安装后支持开机自启和无人值守。';
+    default:
+      return translate(content);
+  }
 }

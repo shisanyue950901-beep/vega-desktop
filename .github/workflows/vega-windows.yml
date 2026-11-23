@@ -252,6 +252,19 @@ jobs:
             Get-ChildItem -Path ./rustdesk -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
+          # 截图按中文界面渲染（与国内用户一致）：写入 LocalConfig 的 lang 选项。
+          $cfgDir = Join-Path $env:APPDATA "Vega\config"
+          New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`n"
+          Add-Type -TypeDefinition @"
+          using System; using System.Runtime.InteropServices;
+          public static class VegaWin {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+          }
+          "@
           Write-Host "Launching $exe"
           $proc = Start-Process -FilePath $exe -PassThru
           $out = $null
@@ -272,14 +285,24 @@ jobs:
             exit 0
           }
           try {
-            Start-Sleep 2
-            Add-Type -AssemblyName System.Windows.Forms
+            $h = $proc.MainWindowHandle
+            [VegaWin]::ShowWindow($h, 9) | Out-Null
+            [VegaWin]::SetForegroundWindow($h) | Out-Null
+            Start-Sleep 3
+            $proc.Refresh()
+            if ($proc.HasExited -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+              Write-Host "vega exited before capture, skip UI screenshot"
+              exit 0
+            }
+            $r = New-Object VegaWin+RECT
+            [VegaWin]::GetWindowRect($proc.MainWindowHandle, [ref]$r) | Out-Null
+            $w = $r.R - $r.L; $hgt = $r.B - $r.T
+            if ($w -le 0 -or $hgt -le 0) { Write-Host "bad window rect, skip"; exit 0 }
             Add-Type -AssemblyName System.Drawing
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $bmp = New-Object System.Drawing.Bitmap $w, $hgt
             $gfx = [System.Drawing.Graphics]::FromImage($bmp)
             try {
-              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $gfx.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size $w, $hgt))
               New-Item -ItemType Directory -Force -Path ./screenshots | Out-Null
               $out = Join-Path (Resolve-Path ./screenshots) "shot-home.png"
               $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)

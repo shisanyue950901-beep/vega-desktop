@@ -1,3 +1,4 @@
+import 'package:flutter_hbb/vega_theme.dart';
 import 'dart:async';
 import 'dart:collection';
 
@@ -191,18 +192,25 @@ class _PeersViewState extends State<_PeersView>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Vega 修改：空状态改为中性图标 + 次要色文字（上游为哭脸）。
                 Icon(
-                  Icons.sentiment_very_dissatisfied_rounded,
-                  color: Theme.of(context).tabBarTheme.labelColor,
-                  size: 40,
+                  widget.peers.loadEvent == LoadEvent.recent
+                      ? Icons.history_rounded
+                      : Icons.inbox_outlined,
+                  color: VegaColors.of(context).secondary.withOpacity(0.6),
+                  size: 36,
                 ).paddingOnly(bottom: 10),
                 Text(
-                  translate(
-                    _emptyMessages[widget.peers.loadEvent] ?? 'Empty',
-                  ),
+                  widget.peers.loadEvent == LoadEvent.recent
+                      ? '还没有连接记录\n在上方输入伙伴 ID 开始第一次连接'
+                      : translate(
+                          _emptyMessages[widget.peers.loadEvent] ?? 'Empty',
+                        ),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Theme.of(context).tabBarTheme.labelColor,
+                    fontSize: 13,
+                    height: 1.5,
+                    color: VegaColors.of(context).secondary,
                   ),
                 ),
               ],
