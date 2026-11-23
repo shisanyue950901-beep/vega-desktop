@@ -238,6 +238,51 @@ jobs:
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
 
+      - name: UI 截图
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = @(
+            "./flutter/build/windows/x64/runner/Release/vega.exe",
+            "./rustdesk/vega.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $exe) {
+            Write-Host "vega.exe not found, skip UI screenshot"
+            Get-ChildItem -Path ./rustdesk -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          Write-Host "Launching $exe"
+          $proc = Start-Process -FilePath $exe -PassThru
+          $out = $null
+          try {
+            Start-Sleep 20
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            try {
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              New-Item -ItemType Directory -Force -Path ./screenshots | Out-Null
+              $out = Join-Path (Resolve-Path ./screenshots) "shot-home.png"
+              $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+            } finally {
+              $gfx.Dispose()
+              $bmp.Dispose()
+            }
+          } finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+          Get-Item $out | Format-List FullName, Length
+
+      - name: Upload vega-screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vega-screenshots
+          path: ./screenshots/shot-home.png
+          if-no-files-found: warn
+
       - name: Upload vega-windows-x64
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
