@@ -87,7 +87,10 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
           child: Offstage(
             offstage: !(!_svcStopped.value &&
                 stateGlobal.svcStatus.value == SvcStatus.ready &&
-                _svcIsUsingPublicServer.value),
+                _svcIsUsingPublicServer.value &&
+                // Vega fork：上游定价页关闭时不渲染「setup_server_tip」入口，
+                // 控件与文案保留，把 kUpstreamPricingUrl 填回即可恢复。
+                kUpstreamPricingUrl.isNotEmpty),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
