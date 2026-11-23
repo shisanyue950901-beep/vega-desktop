@@ -202,21 +202,26 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             pwdText.isNotEmpty &&
             pwdText != '-' &&
             pwdText != translate('Generating ...');
+        // Vega 修改：沿用 Vega 0.6 品牌——极光渐变 + 星光点缀的主卡片，白色文字。
         return Container(
           margin: const EdgeInsets.only(left: 16, right: 12, top: 12),
-          padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
           decoration: BoxDecoration(
-            color: palette.card,
+            gradient: VegaColors.aurora,
             borderRadius: BorderRadius.circular(palette.radius),
-            border: Border.all(color: palette.separator, width: 0.8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: VegaColors.auroraStart.withOpacity(0.35),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            children: [
+              const Positioned.fill(child: VegaStars()),
+              Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -230,26 +235,27 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
-                        color: palette.text,
+                        color: Colors.white,
                       ),
                     ),
                   ),
                   if (!bind.isDisableSettings())
                     buildCardIconButton(
                       context: context,
+                      onHero: true,
                       icon: Icons.edit_outlined,
                       tooltip: translate('Change Password'),
                       onTap: () =>
                           DesktopSettingPage.switch2page(SettingsTabKey.safety),
                     ),
-                  buildPopupMenu(context),
+                  buildPopupMenu(context, onHero: true),
                 ],
               ),
               const SizedBox(height: 6),
               // ID
               Text(
                 'ID',
-                style: TextStyle(fontSize: 11, color: palette.secondary),
+                style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.78)),
               ),
               // Vega 修改：InkWell 可 Tab 聚焦、Enter/Space 触发复制，键盘用户也能单独复制 ID。
               InkWell(
@@ -266,6 +272,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       readOnly: true,
                       enableInteractiveSelection: false,
                       decoration: const InputDecoration(
+                        filled: false,
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(vertical: 4),
@@ -280,7 +287,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           'Consolas',
                           'Courier New'
                         ],
-                        color: palette.text,
+                        color: Colors.white,
                       ),
                     ).workaroundFreezeLinuxMint(),
                   ),
@@ -293,11 +300,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                   Expanded(
                     child: Text(
                       '临时密码',
-                      style: TextStyle(fontSize: 11, color: palette.secondary),
+                      style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.78)),
                     ),
                   ),
                   buildCardIconButton(
                     context: context,
+                    onHero: true,
                     icon: _obscurePassword
                         ? Icons.visibility_off_outlined
                         : Icons.visibility_outlined,
@@ -319,7 +327,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                             child: Icon(
                               Icons.refresh,
                               size: 20,
-                              color: palette.secondary,
+                              color: Colors.white.withOpacity(0.78),
                             ),
                           ),
                         ),
@@ -345,6 +353,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       obscureText: _obscurePassword,
                       obscuringCharacter: '•',
                       decoration: const InputDecoration(
+                        filled: false,
                         border: InputBorder.none,
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(vertical: 4),
@@ -358,7 +367,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           'Consolas',
                           'Courier New'
                         ],
-                        color: palette.text,
+                        color: Colors.white,
                       ),
                     ).workaroundFreezeLinuxMint(),
                   ),
@@ -367,7 +376,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               const SizedBox(height: 10),
               // 复制并分享
               Material(
-                color: palette.accent,
+                color: Colors.white.withOpacity(0.22),
                 borderRadius: BorderRadius.circular(10),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
@@ -403,6 +412,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               ),
             ],
           ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -414,8 +426,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
+    bool onHero = false,
   }) {
     final palette = VegaColors.of(context);
+    final idle = onHero ? Colors.white.withOpacity(0.78) : palette.secondary;
+    final active = onHero ? Colors.white : palette.text;
     final RxBool hover = false.obs;
     return Obx(
       () => InkWell(
@@ -429,7 +444,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             child: Icon(
               icon,
               size: 20,
-              color: hover.value ? palette.text : palette.secondary,
+              color: hover.value ? active : idle,
             ),
           ),
         ),
@@ -437,8 +452,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
-  Widget buildPopupMenu(BuildContext context) {
-    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+  Widget buildPopupMenu(BuildContext context, {bool onHero = false}) {
+    final textColor = onHero
+        ? Colors.white
+        : Theme.of(context).textTheme.titleLarge?.color;
     RxBool hover = false.obs;
     return InkWell(
       onTap: DesktopTabPage.onAddSetting,
@@ -447,9 +464,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: Obx(
           () => CircleAvatar(
             radius: 15,
-            backgroundColor: hover.value
-                ? Theme.of(context).scaffoldBackgroundColor
-                : Theme.of(context).colorScheme.background,
+            backgroundColor: onHero
+                ? Colors.white.withOpacity(hover.value ? 0.28 : 0.16)
+                : (hover.value
+                    ? Theme.of(context).scaffoldBackgroundColor
+                    : Theme.of(context).colorScheme.background),
             child: Icon(
               Icons.more_vert_outlined,
               size: 20,
@@ -486,7 +505,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           Text(
             isOutgoingOnly
                 ? translate("outgoing_only_desk_tip")
-                : '把本设备 ID 和临时密码发给对方即可连接',
+                : '把 ID 和密码发给对方即可',
             overflow: TextOverflow.clip,
             style: TextStyle(fontSize: 12, height: 1.4, color: palette.secondary),
           ),
@@ -1210,7 +1229,7 @@ String vegaCardTitle(String content) {
   switch (content) {
     case 'install_tip':
     case '':
-      return '安装到本机，连接更稳定';
+      return '安装到本机更稳定';
     case 'install_daemon_tip':
       return '安装系统服务';
     default:
