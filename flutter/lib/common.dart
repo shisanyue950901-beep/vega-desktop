@@ -4111,6 +4111,11 @@ void earlyAssert() {
 }
 
 void checkUpdate() {
+  // Vega fork：关闭上游版本检查开关时，不注册事件、不向
+  // api.rustdesk.com 发任何请求。
+  if (!kEnableUpstreamUpdateCheck) {
+    return;
+  }
   if (!isWeb) {
     if (!bind.isCustomClient()) {
       platformFFI.registerEventHandler(
