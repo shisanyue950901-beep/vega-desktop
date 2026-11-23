@@ -321,11 +321,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               ),
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  Clipboard.setData(
-                      ClipboardData(text: model.serverPasswd.text));
-                  showToast(translate("Copied"));
-                },
+                onTap: showOneTime
+                    ? () {
+                        Clipboard.setData(
+                            ClipboardData(text: model.serverPasswd.text));
+                        showToast(translate("Copied"));
+                      }
+                    : null,
                 child: Tooltip(
                   message: translate('Copy'),
                   child: IgnorePointer(
@@ -363,8 +365,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
                   onTap: () {
-                    final text = 'ID: ${model.serverId.text} 密码: '
-                        '${model.serverPasswd.text}';
+                    final text = showOneTime
+                        ? 'ID: ${model.serverId.text} 密码: '
+                            '${model.serverPasswd.text}'
+                        : 'ID: ${model.serverId.text}';
                     Clipboard.setData(ClipboardData(text: text));
                     showToast(translate("Copied"));
                   },
