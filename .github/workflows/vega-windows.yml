@@ -255,8 +255,24 @@ jobs:
           Write-Host "Launching $exe"
           $proc = Start-Process -FilePath $exe -PassThru
           $out = $null
+          $ready = $false
+          $deadline = (Get-Date).AddSeconds(60)
+          while ((Get-Date) -lt $deadline) {
+            if ($proc.HasExited) { break }
+            try { $proc.Refresh() } catch { break }
+            if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
+              $ready = $true
+              break
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          if (-not $ready) {
+            Write-Host "vega window not ready within 60s or process exited, skip UI screenshot"
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            exit 0
+          }
           try {
-            Start-Sleep 20
+            Start-Sleep 2
             Add-Type -AssemblyName System.Windows.Forms
             Add-Type -AssemblyName System.Drawing
             $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -277,6 +293,7 @@ jobs:
           Get-Item $out | Format-List FullName, Length
 
       - name: Upload vega-screenshots
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vega-screenshots
