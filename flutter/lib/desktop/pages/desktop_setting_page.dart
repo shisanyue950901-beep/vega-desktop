@@ -2636,6 +2636,10 @@ class _AboutState extends State<_About> {
                     translate('Website'),
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
+              SelectionArea(
+                  child: const Text(
+                          '基于 RustDesk，AGPL-3.0 开源，源代码：https://github.com/shisanyue950901-beep/vega-desktop')
+                      .marginSymmetric(vertical: 4.0)),
               Container(
                 decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
                 padding:
