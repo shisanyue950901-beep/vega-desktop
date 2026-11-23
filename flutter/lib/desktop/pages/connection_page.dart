@@ -229,6 +229,8 @@ class _ConnectionPageState extends State<ConnectionPage>
     super.initState();
     _allPeersLoader.init(setState);
     _idFocusNode.addListener(onFocusChanged);
+    // 进页面就主动加载一次最近 peers，避免 chip 依赖其他页面的加载时机。
+    bind.mainLoadRecentPeers();
     if (_idController.text.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         final lastRemoteId = await bind.mainGetLastRemoteId();
@@ -491,7 +493,8 @@ class _ConnectionPageState extends State<ConnectionPage>
                             fillColor: palette.bg,
                             isDense: true,
                             counterText: '',
-                            hintText: '输入伙伴 ID',
+                            hintText:
+                                _idInputFocused.value ? '' : '输入伙伴 ID',
                             hintStyle: TextStyle(
                               fontSize: 15,
                               color: palette.secondary,
