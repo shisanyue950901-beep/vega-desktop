@@ -29,11 +29,15 @@ src/lang/en.rs
 - `flutter/lib/common.dart`：`checkUpdate` 按开关直接返回，不再请求上游更新服务。
 - `flutter/lib/desktop/pages/connection_page.dart`：按开关隐藏公共服务器定价入口，引入 vega_links。
 - `flutter/lib/desktop/pages/desktop_home_page.dart`：首页新版本提示 / 自动更新卡片按开关隐藏。
-- `flutter/lib/desktop/pages/desktop_setting_page.dart`：设置页 Windows 自动更新与启动检查入口按开关隐藏；关于页新增一行 RustDesk/AGPL-3.0 与源码地址说明。
+- `flutter/lib/desktop/pages/desktop_setting_page.dart`：设置页 Windows 自动更新与启动检查入口按开关隐藏；关于页的 Website / Privacy Statement 入口改由 `kUpstreamWebsiteUrl` / `kUpstreamPrivacyUrl` 控制（地址为空则不渲染），新增一行 RustDesk/AGPL-3.0 与源码地址说明，该行可点击并打开 `kVegaSourceUrl`。
 - `flutter/pubspec.yaml`、`flutter/windows/CMakeLists.txt`、`flutter/windows/runner/Runner.rc`：产品名/可执行文件名与版本资源改为 Vega。
 - `libs/hbb_common/src/config.rs`、`src/client.rs`、`src/common.rs`：品牌与上游服务地址相关调整。
 - `src/auth_2fa.rs`：2FA 发行方名称改为 Vega。
 - `src/lang/cn.rs`、`src/lang/en.rs`：中英文语言包中用户可见名称改为 Vega。
+
+## 保留上游文案的地方
+
+- `upgrade_rustdesk_server_pro_to_{}_tip`（`src/lang/en.rs`、`src/lang/cn.rs`）：仍指上游的 RustDesk Server Pro / 专业版服务器，本 fork 不发行该产品，故不改成 Vega 名称。
 
 ## 许可
 
