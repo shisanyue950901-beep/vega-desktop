@@ -65,6 +65,13 @@ enum SettingsTabKey {
 
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
+
+  /// Vega：设置侧栏隐藏的分组开关。页面代码全部保留，只在 tabKeys 里条件跳过。
+  /// Plugin 分组当前版本尚未提供页面，接入时把 [showPluginTab] 打开并把
+  /// SettingsTabKey.plugin 补进枚举与 tabKeys 即可。
+  static const bool showPluginTab = false;
+  static const bool showAccountTab = false;
+
   static final List<SettingsTabKey> tabKeys = [
     if (bind.mainGetBuildinOption(key: kOptionHideGeneralSetting) != 'Y')
       SettingsTabKey.general,
@@ -77,7 +84,8 @@ class DesktopSettingPage extends StatefulWidget {
         bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
       SettingsTabKey.network,
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
-    if (!bind.isDisableAccount()) SettingsTabKey.account,
+    // Vega：Account 分组暂不对外展示（代码保留，条件跳过）。
+    if (showAccountTab && !bind.isDisableAccount()) SettingsTabKey.account,
     if (isWindows &&
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideRemotePrinterSetting) != 'Y')
