@@ -46,6 +46,7 @@ import 'package:flutter_hbb/native/win32.dart'
 import 'package:flutter_hbb/native/common.dart'
     if (dart.library.html) 'package:flutter_hbb/web/common.dart';
 import 'package:flutter_hbb/utils/http_service.dart' as http;
+import 'package:flutter_hbb/vega_links.dart';
 
 final globalKey = GlobalKey<NavigatorState>();
 final navigationBarKey = GlobalKey();
@@ -3774,11 +3775,15 @@ Widget loadPowered(BuildContext context) {
   if (bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
     return SizedBox.shrink();
   }
+  // Vega fork：上游官网外链关闭时直接不渲染「powered by」入口。
+  if (kUpstreamWebsiteUrl.isEmpty) {
+    return SizedBox.shrink();
+  }
   return MouseRegion(
     cursor: SystemMouseCursors.click,
     child: GestureDetector(
       onTap: () {
-        launchUrl(Uri.parse('https://rustdesk.com'));
+        openVegaLink(kUpstreamWebsiteUrl);
       },
       child: Opacity(
           opacity: 0.5,
@@ -4106,6 +4111,11 @@ void earlyAssert() {
 }
 
 void checkUpdate() {
+  // Vega fork：关闭上游版本检查开关时，不注册事件、不向
+  // api.rustdesk.com 发任何请求。
+  if (!kEnableUpstreamUpdateCheck) {
+    return;
+  }
   if (!isWeb) {
     if (!bind.isCustomClient()) {
       platformFFI.registerEventHandler(

@@ -24,6 +24,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
 import '../widgets/button.dart';
+import 'package:flutter_hbb/vega_links.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -428,7 +429,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards(String updateUrl) {
-    if (!bind.isCustomClient() &&
+    if (kEnableUpstreamUpdateCheck &&
+        !bind.isCustomClient() &&
         updateUrl.isNotEmpty &&
         !isCardClosed &&
         bind.mainUriPrefixSync().contains('rustdesk')) {
@@ -662,7 +664,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                                   ])
                             ]
                           : <Widget>[]) +
-                      (help != null
+                      // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
+                      (help != null && link != null && kUpstreamDocsUrl.isNotEmpty
                           ? <Widget>[
                               Center(
                                   child: InkWell(

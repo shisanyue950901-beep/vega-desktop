@@ -68,7 +68,7 @@ lazy_static::lazy_static! {
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
-    pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
+    pub static ref APP_NAME: RwLock<String> = RwLock::new("Vega".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -96,8 +96,9 @@ lazy_static::lazy_static! {
     pub static ref APP_HOME_DIR: RwLock<String> = Default::default();
 }
 
-pub const LINK_DOCS_HOME: &str = "https://rustdesk.com/docs/en/";
-pub const LINK_DOCS_X11_REQUIRED: &str = "https://rustdesk.com/docs/en/manual/linux/#x11-required";
+// Vega: 上游文档外链关闭，保持空串。
+pub const LINK_DOCS_HOME: &str = "";
+pub const LINK_DOCS_X11_REQUIRED: &str = "";
 
 lazy_static::lazy_static! {
     pub static ref HELPER_URL: HashMap<&'static str, &'static str> = HashMap::from([
@@ -113,8 +114,54 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
-pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
+pub const RENDEZVOUS_SERVERS: &[&str] = &["60.205.95.98"];
+
+// Vega: 官方 RustDesk 节点（域名 + 历史官方公共 IP）。
+// 持久化配置或序列号缓存里命中这些节点时一律忽略，回落到 RENDEZVOUS_SERVERS（Vega 预置）。
+const OFFICIAL_RENDEZVOUS_HOSTS: &[&str] = &[
+    "rustdesk.com",
+    "rs-ny.rustdesk.com",
+    "rs-sg.rustdesk.com",
+    "rs-cn.rustdesk.com",
+    "rs-ca.rustdesk.com",
+    "rs-eu.rustdesk.com",
+    "rs-in.rustdesk.com",
+    // 历史官方公共服务器 IP
+    "159.138.39.146",
+    "159.138.39.49",
+    "159.138.39.168",
+    "47.100.78.123",
+    "47.102.113.204",
+    "116.205.139.61",
+    "116.205.143.132",
+    "8.209.117.143",
+    "45.76.190.141",
+];
+
+// Vega: 判断某个 rendezvous 主机（可带端口）是否为官方 RustDesk 节点。
+pub fn is_official_rendezvous_server(host: &str) -> bool {
+    let host = host.trim();
+    if host.is_empty() {
+        return false;
+    }
+    // 去掉端口，仅当末尾是纯数字且主机部分不含 ':'（避免误伤 IPv6 字面量）
+    let name = if let Some((h, p)) = host.rsplit_once(':') {
+        if !h.contains(':') && !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
+            h
+        } else {
+            host
+        }
+    } else {
+        host
+    };
+    let name = name.trim().to_ascii_lowercase();
+    name.contains("rustdesk.com")
+        || OFFICIAL_RENDEZVOUS_HOSTS
+            .iter()
+            .any(|h| name == *h || name.ends_with(&format!(".{h}")))
+}
+
+pub const RS_PUB_KEY: &str = "vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;
@@ -1049,13 +1096,26 @@ impl Config {
     pub fn get_rendezvous_server() -> String {
         let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
         if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_option("custom-rendezvous-server");
+            // Vega: custom-rendezvous-server 指向官方 RustDesk 节点时视为未设置，
+            // 回落到 Vega 预置；自建地址原样保留。
+            let custom = Self::get_option("custom-rendezvous-server");
+            if is_official_rendezvous_server(&custom) {
+                log::debug!("Ignoring upstream custom-rendezvous-server: {:?}", custom);
+            } else {
+                rendezvous_server = custom;
+            }
         }
         if rendezvous_server.is_empty() {
             rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
         }
         if rendezvous_server.is_empty() {
-            rendezvous_server = CONFIG2.read().unwrap().rendezvous_server.clone();
+            let stored = CONFIG2.read().unwrap().rendezvous_server.clone();
+            if is_official_rendezvous_server(&stored) {
+                // Vega: 忽略持久化下来的官方节点，回落到预置服务器
+                log::debug!("Ignoring upstream rendezvous_server in config: {:?}", stored);
+            } else {
+                rendezvous_server = stored;
+            }
         }
         if rendezvous_server.is_empty() {
             rendezvous_server = Self::get_rendezvous_servers()
@@ -1075,7 +1135,8 @@ impl Config {
             return vec![s];
         }
         let s = Self::get_option("custom-rendezvous-server");
-        if !s.is_empty() {
+        // Vega: 官方 RustDesk 节点视为未设置，继续走后续回落逻辑；自建地址保留。
+        if !s.is_empty() && !is_official_rendezvous_server(&s) {
             return vec![s];
         }
         let s = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
@@ -1087,6 +1148,8 @@ impl Config {
             let ss: Vec<String> = Self::get_option("rendezvous-servers")
                 .split(',')
                 .filter(|x| x.contains('.'))
+                // Vega: 序列号缓存里的官方节点同样忽略
+                .filter(|x| !is_official_rendezvous_server(x))
                 .map(|x| x.to_owned())
                 .collect();
             if !ss.is_empty() {

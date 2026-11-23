@@ -209,13 +209,31 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
+      - name: Check vega.exe exists
+        shell: pwsh
+        run: |
+          $exe = "./rustdesk/vega.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "vega.exe not found at $exe"
+            Get-ChildItem -Path ./rustdesk -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
+            exit 1
+          }
+          Get-Item $exe | Format-List FullName, Length
+
+      - name: Copy LICENCE and NOTICE-VEGA.md into rustdesk dir
+        shell: bash
+        run: |
+          cp -f LICENCE ./rustdesk/LICENCE
+          cp -f NOTICE-VEGA.md ./rustdesk/NOTICE-VEGA.md
+          ls -l ./rustdesk/LICENCE ./rustdesk/NOTICE-VEGA.md
+
       - name: Build self-extracted executable
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/vega.exe
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe

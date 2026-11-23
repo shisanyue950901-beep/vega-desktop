@@ -19,6 +19,7 @@ import '../../common/formatter/id_formatter.dart';
 import '../../common/widgets/peer_tab_page.dart';
 import '../../common/widgets/autocomplete.dart';
 import '../../models/platform_model.dart';
+import 'package:flutter_hbb/vega_links.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
 
 class OnlineStatusWidget extends StatefulWidget {
@@ -41,7 +42,11 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   double? get height => bind.isIncomingOnly() ? null : em * 3;
 
   void onUsePublicServerGuide() {
-    const url = "https://rustdesk.com/pricing";
+    // Vega fork：上游定价外链关闭（kUpstreamPricingUrl 为空），直接返回。
+    const url = kUpstreamPricingUrl;
+    if (url.isEmpty) {
+      return;
+    }
     canLaunchUrlString(url).then((can) {
       if (can) {
         launchUrlString(url);
@@ -82,7 +87,10 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
           child: Offstage(
             offstage: !(!_svcStopped.value &&
                 stateGlobal.svcStatus.value == SvcStatus.ready &&
-                _svcIsUsingPublicServer.value),
+                _svcIsUsingPublicServer.value &&
+                // Vega fork：上游定价页关闭时不渲染「setup_server_tip」入口，
+                // 控件与文案保留，把 kUpstreamPricingUrl 填回即可恢复。
+                kUpstreamPricingUrl.isNotEmpty),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [

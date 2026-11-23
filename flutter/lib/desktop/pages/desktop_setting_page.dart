@@ -27,6 +27,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
+import 'package:flutter_hbb/vega_links.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -524,8 +525,12 @@ class _GeneralState extends State<_General> {
   Widget other() {
     final incomingOnly = bind.isIncomingOnly();
     final outgoingOnly = bind.isOutgoingOnly();
-    final showAutoUpdate = (isWindows && bind.mainIsInstalled()) ||
-    (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false) && !bind.isCustomClient());
+    final showAutoUpdate = kEnableUpstreamUpdateCheck &&
+        ((isWindows && bind.mainIsInstalled()) ||
+            (isMacOS &&
+                bind.mainIsInstalled() &&
+                bind.mainIsInstalledDaemon(prompt: false) &&
+                !bind.isCustomClient()));
     final children = <Widget>[
       if (!isWeb && !incomingOnly)
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
@@ -593,7 +598,7 @@ class _GeneralState extends State<_General> {
             ),
           ),
       ],
-      if (!isWeb && !bind.isCustomClient())
+      if (!isWeb && !bind.isCustomClient() && kEnableUpstreamUpdateCheck)
         _OptionCheckBox(
           context,
           'Check for software update on startup',
@@ -2291,15 +2296,22 @@ class _AccountState extends State<_Account> {
   }
 
   Widget accountAction() {
-    return Obx(() => _Button(
-        gFFI.userModel.userName.value.isEmpty
-            ? 'Login'
-            : '${translate('Logout')} (${gFFI.userModel.accountLabelWithHandle})',
-        () => {
-              gFFI.userModel.userName.value.isEmpty
-                  ? loginDialog()
-                  : logOutConfirmDialog()
-            }));
+    return Obx(() {
+      if (gFFI.userModel.userName.value.isNotEmpty) {
+        return _Button(
+            '${translate('Logout')} (${gFFI.userModel.accountLabelWithHandle})',
+            () => logOutConfirmDialog());
+      }
+      // API 地址为空（bind.mainGetApiServer 返回空串）时不能登录，隐藏登录入口。
+      return FutureBuilder<String>(
+          future: bind.mainGetApiServer(),
+          builder: (context, snapshot) {
+            if (snapshot.data?.isNotEmpty != true) {
+              return const SizedBox.shrink();
+            }
+            return _Button('Login', () => loginDialog());
+          });
+    });
   }
 
   Widget useInfo() {
@@ -2615,20 +2627,30 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('ID')}: $myId')
                       .marginSymmetric(vertical: 4.0)),
+              if (kUpstreamWebsiteUrl.isNotEmpty)
+                InkWell(
+                    onTap: () {
+                      launchUrl(Uri.parse(kUpstreamWebsiteUrl));
+                    },
+                    child: Text(
+                      translate('Website'),
+                      style: linkStyle,
+                    ).marginSymmetric(vertical: 4.0)),
+              if (kUpstreamPrivacyUrl.isNotEmpty)
+                InkWell(
+                    onTap: () {
+                      launchUrl(Uri.parse(kUpstreamPrivacyUrl));
+                    },
+                    child: Text(
+                      translate('Privacy Statement'),
+                      style: linkStyle,
+                    ).marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
+                    launchUrl(Uri.parse(kVegaSourceUrl));
                   },
                   child: Text(
-                    translate('Privacy Statement'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com');
-                  },
-                  child: Text(
-                    translate('Website'),
+                    kVegaAboutLine,
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
               Container(
