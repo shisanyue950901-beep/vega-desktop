@@ -2620,26 +2620,32 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('ID')}: $myId')
                       .marginSymmetric(vertical: 4.0)),
+              if (kUpstreamWebsiteUrl.isNotEmpty)
+                InkWell(
+                    onTap: () {
+                      launchUrl(Uri.parse(kUpstreamWebsiteUrl));
+                    },
+                    child: Text(
+                      translate('Website'),
+                      style: linkStyle,
+                    ).marginSymmetric(vertical: 4.0)),
+              if (kUpstreamPrivacyUrl.isNotEmpty)
+                InkWell(
+                    onTap: () {
+                      launchUrl(Uri.parse(kUpstreamPrivacyUrl));
+                    },
+                    child: Text(
+                      translate('Privacy Statement'),
+                      style: linkStyle,
+                    ).marginSymmetric(vertical: 4.0)),
               InkWell(
                   onTap: () {
-                    launchUrlString('https://rustdesk.com/privacy.html');
+                    launchUrl(Uri.parse(kVegaSourceUrl));
                   },
                   child: Text(
-                    translate('Privacy Statement'),
+                    kVegaAboutLine,
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
-              InkWell(
-                  onTap: () {
-                    launchUrlString('https://rustdesk.com');
-                  },
-                  child: Text(
-                    translate('Website'),
-                    style: linkStyle,
-                  ).marginSymmetric(vertical: 4.0)),
-              SelectionArea(
-                  child: const Text(
-                          '基于 RustDesk，AGPL-3.0 开源，源代码：https://github.com/shisanyue950901-beep/vega-desktop')
-                      .marginSymmetric(vertical: 4.0)),
               Container(
                 decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
                 padding:
