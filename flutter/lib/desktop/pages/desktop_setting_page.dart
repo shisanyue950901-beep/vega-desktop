@@ -28,6 +28,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import 'package:flutter_hbb/vega_links.dart';
+import 'package:flutter_hbb/vega_theme.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
