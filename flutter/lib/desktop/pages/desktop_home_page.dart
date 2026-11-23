@@ -18,6 +18,7 @@ import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
+import 'package:flutter_hbb/vega_theme.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -50,6 +51,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
   bool isCardClosed = false;
+  // 「本设备」卡片：临时密码默认掩码显示
+  bool _obscurePassword = true;
 
   final RxBool _editHover = false.obs;
   final RxBool _block = false.obs;
@@ -91,8 +94,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: loadLogo(),
       ),
       buildTip(context),
-      if (!isOutgoingOnly) buildIDBoard(context),
-      if (!isOutgoingOnly) buildPasswordBoard(context),
+      if (!isOutgoingOnly) buildDeviceCard(context),
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -186,70 +188,250 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
-  buildIDBoard(BuildContext context) {
-    final model = gFFI.serverModel;
-    return Container(
-      margin: const EdgeInsets.only(left: 20, right: 11),
-      height: 57,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Container(
-            width: 2,
-            decoration: const BoxDecoration(color: MyTheme.accent),
-          ).marginOnly(top: 5),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+  /// 「本设备」卡片：ID、临时密码（掩码/眼睛切换/刷新）与复制并分享。
+  Widget buildDeviceCard(BuildContext context) {
+    final palette = VegaColors.of(context);
+    return Consumer<ServerModel>(
+      builder: (context, model, child) {
+        final showOneTime = model.approveMode != 'click' &&
+            model.verificationMethod != kUsePermanentPassword;
+        // 临时密码只有在真正可用时才允许复制 / 分享：
+        // 非空、不是占位 '-'，也不在生成中（生成中显示 "Generating ..."）。
+        final pwdText = model.serverPasswd.text.trim();
+        final pwdReady = showOneTime &&
+            pwdText.isNotEmpty &&
+            pwdText != '-' &&
+            pwdText != translate('Generating ...');
+        return Container(
+          margin: const EdgeInsets.only(left: 16, right: 12, top: 12),
+          padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
+          decoration: BoxDecoration(
+            color: palette.card,
+            borderRadius: BorderRadius.circular(palette.radius),
+            border: Border.all(color: palette.separator, width: 0.8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 标题行
+              Row(
                 children: [
-                  Container(
-                    height: 25,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  Expanded(
+                    child: Text(
+                      '本设备',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: palette.text,
+                      ),
+                    ),
+                  ),
+                  if (!bind.isDisableSettings())
+                    buildCardIconButton(
+                      context: context,
+                      icon: Icons.edit_outlined,
+                      tooltip: translate('Change Password'),
+                      onTap: () =>
+                          DesktopSettingPage.switch2page(SettingsTabKey.safety),
+                    ),
+                  buildPopupMenu(context),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // ID
+              Text(
+                'ID',
+                style: TextStyle(fontSize: 11, color: palette.secondary),
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: model.serverId.text));
+                  showToast(translate("Copied"));
+                },
+                child: Tooltip(
+                  message: translate('Copy'),
+                  child: IgnorePointer(
+                    child: TextFormField(
+                      controller: model.serverId,
+                      readOnly: true,
+                      enableInteractiveSelection: false,
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 4),
+                      ),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.8,
+                        fontFamily: 'monospace',
+                        fontFamilyFallback: const [
+                          'Menlo',
+                          'Consolas',
+                          'Courier New'
+                        ],
+                        color: palette.text,
+                      ),
+                    ).workaroundFreezeLinuxMint(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              // 临时密码
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '临时密码',
+                      style: TextStyle(fontSize: 11, color: palette.secondary),
+                    ),
+                  ),
+                  buildCardIconButton(
+                    context: context,
+                    icon: _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    tooltip: _obscurePassword
+                        ? translate('Show Password')
+                        : translate('Hide Password'),
+                    onTap: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                  if (showOneTime)
+                    AnimatedRotationWidget(
+                      onPressed: () => bind.mainUpdateTemporaryPassword(),
+                      child: Tooltip(
+                        message: translate('Refresh Password'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: RotatedBox(
+                            quarterTurns: 2,
+                            child: Icon(
+                              Icons.refresh,
+                              size: 20,
+                              color: palette.secondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: pwdReady
+                    ? () {
+                        Clipboard.setData(ClipboardData(text: pwdText));
+                        showToast(translate("Copied"));
+                      }
+                    : null,
+                child: Tooltip(
+                  message: translate('Copy'),
+                  child: IgnorePointer(
+                    child: TextFormField(
+                      controller: model.serverPasswd,
+                      readOnly: true,
+                      enableInteractiveSelection: false,
+                      obscureText: _obscurePassword,
+                      obscuringCharacter: '•',
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 4),
+                      ),
+                      style: TextStyle(
+                        fontSize: 17,
+                        letterSpacing: 1.5,
+                        fontFamily: 'monospace',
+                        fontFamilyFallback: const [
+                          'Menlo',
+                          'Consolas',
+                          'Courier New'
+                        ],
+                        color: palette.text,
+                      ),
+                    ).workaroundFreezeLinuxMint(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              // 复制并分享
+              Material(
+                color: palette.accent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () {
+                    final text = pwdReady
+                        ? 'ID: ${model.serverId.text} 密码: $pwdText'
+                        : 'ID: ${model.serverId.text}';
+                    Clipboard.setData(ClipboardData(text: text));
+                    showToast(translate("Copied"));
+                  },
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    alignment: Alignment.center,
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        Icon(Icons.copy_all_outlined,
+                            size: 16, color: Colors.white),
+                        SizedBox(width: 6),
                         Text(
-                          translate("ID"),
+                          '复制并分享',
                           style: TextStyle(
-                              fontSize: 14,
-                              color: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.color
-                                  ?.withOpacity(0.5)),
-                        ).marginOnly(top: 5),
-                        buildPopupMenu(context)
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  Flexible(
-                    child: GestureDetector(
-                      onDoubleTap: () {
-                        Clipboard.setData(
-                            ClipboardData(text: model.serverId.text));
-                        showToast(translate("Copied"));
-                      },
-                      child: TextFormField(
-                        controller: model.serverId,
-                        readOnly: true,
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.only(top: 10, bottom: 10),
-                        ),
-                        style: TextStyle(
-                          fontSize: 22,
-                        ),
-                      ).workaroundFreezeLinuxMint(),
-                    ),
-                  )
-                ],
+                ),
               ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 卡片内的小图标按钮（带 hover 反馈）。
+  Widget buildCardIconButton({
+    required BuildContext context,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    final palette = VegaColors.of(context);
+    final RxBool hover = false.obs;
+    return Obx(
+      () => InkWell(
+        onTap: onTap,
+        onHover: (value) => hover.value = value,
+        borderRadius: BorderRadius.circular(8),
+        child: Tooltip(
+          message: tooltip,
+          child: Padding(
+            padding: const EdgeInsets.all(4),
+            child: Icon(
+              icon,
+              size: 20,
+              color: hover.value ? palette.text : palette.secondary,
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -276,114 +458,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         ),
       ),
       onHover: (value) => hover.value = value,
-    );
-  }
-
-  buildPasswordBoard(BuildContext context) {
-    return ChangeNotifierProvider.value(
-        value: gFFI.serverModel,
-        child: Consumer<ServerModel>(
-          builder: (context, model, child) {
-            return buildPasswordBoard2(context, model);
-          },
-        ));
-  }
-
-  buildPasswordBoard2(BuildContext context, ServerModel model) {
-    RxBool refreshHover = false.obs;
-    RxBool editHover = false.obs;
-    final textColor = Theme.of(context).textTheme.titleLarge?.color;
-    final showOneTime = model.approveMode != 'click' &&
-        model.verificationMethod != kUsePermanentPassword;
-    return Container(
-      margin: EdgeInsets.only(left: 20.0, right: 16, top: 13, bottom: 13),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.baseline,
-        textBaseline: TextBaseline.alphabetic,
-        children: [
-          Container(
-            width: 2,
-            height: 52,
-            decoration: BoxDecoration(color: MyTheme.accent),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(left: 7),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AutoSizeText(
-                    translate("One-time Password"),
-                    style: TextStyle(
-                        fontSize: 14, color: textColor?.withOpacity(0.5)),
-                    maxLines: 1,
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: GestureDetector(
-                          onDoubleTap: () {
-                            if (showOneTime) {
-                              Clipboard.setData(
-                                  ClipboardData(text: model.serverPasswd.text));
-                              showToast(translate("Copied"));
-                            }
-                          },
-                          child: TextFormField(
-                            controller: model.serverPasswd,
-                            readOnly: true,
-                            decoration: InputDecoration(
-                              border: InputBorder.none,
-                              contentPadding:
-                                  EdgeInsets.only(top: 14, bottom: 10),
-                            ),
-                            style: TextStyle(fontSize: 15),
-                          ).workaroundFreezeLinuxMint(),
-                        ),
-                      ),
-                      if (showOneTime)
-                        AnimatedRotationWidget(
-                          onPressed: () => bind.mainUpdateTemporaryPassword(),
-                          child: Tooltip(
-                            message: translate('Refresh Password'),
-                            child: Obx(() => RotatedBox(
-                                quarterTurns: 2,
-                                child: Icon(
-                                  Icons.refresh,
-                                  color: refreshHover.value
-                                      ? textColor
-                                      : Color(0xFFDDDDDD),
-                                  size: 22,
-                                ))),
-                          ),
-                          onHover: (value) => refreshHover.value = value,
-                        ).marginOnly(right: 8, top: 4),
-                      if (!bind.isDisableSettings())
-                        InkWell(
-                          child: Tooltip(
-                            message: translate('Change Password'),
-                            child: Obx(
-                              () => Icon(
-                                Icons.edit,
-                                color: editHover.value
-                                    ? textColor
-                                    : Color(0xFFDDDDDD),
-                                size: 22,
-                              ).marginOnly(right: 8, top: 4),
-                            ),
-                          ),
-                          onTap: () => DesktopSettingPage.switch2page(
-                              SettingsTabKey.safety),
-                          onHover: (value) => editHover.value = value,
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

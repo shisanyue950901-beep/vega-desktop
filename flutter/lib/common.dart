@@ -17,6 +17,7 @@ import 'package:flutter_hbb/models/peer_tab_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:flutter_hbb/utils/platform_channel.dart';
+import 'package:flutter_hbb/vega_theme.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:get/get_rx/src/rx_workers/utils/debouncer.dart';
@@ -375,15 +376,16 @@ class MyTheme {
     useMaterial3: false,
     brightness: Brightness.light,
     hoverColor: Color.fromARGB(255, 224, 224, 224),
-    scaffoldBackgroundColor: Colors.white,
-    dialogBackgroundColor: Colors.white,
+    scaffoldBackgroundColor: VegaColors.lightBg,
+    primaryColor: VegaColors.lightAccent,
+    dialogBackgroundColor: VegaColors.lightCard,
     appBarTheme: AppBarTheme(
       shadowColor: Colors.transparent,
     ),
     dialogTheme: DialogTheme(
       elevation: 15,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18.0),
+        borderRadius: BorderRadius.circular(VegaColors.radius),
         side: BorderSide(
           width: 1,
           color: grayBg,
@@ -408,7 +410,7 @@ class MyTheme {
         bodyMedium:
             TextStyle(fontSize: 14, color: Colors.black87, height: 1.25),
         labelLarge: TextStyle(fontSize: 16.0, color: MyTheme.accent80)),
-    cardColor: grayBg,
+    cardColor: VegaColors.lightCard,
     hintColor: Color(0xFFAAAAAA),
     visualDensity: VisualDensity.adaptivePlatformDensity,
     tabBarTheme: const TabBarTheme(
@@ -432,7 +434,7 @@ class MyTheme {
       style: ElevatedButton.styleFrom(
         backgroundColor: MyTheme.accent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
+          borderRadius: BorderRadius.circular(VegaColors.radius),
         ),
       ),
     ),
@@ -441,7 +443,7 @@ class MyTheme {
         backgroundColor: grayBg,
         foregroundColor: Colors.black87,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
+          borderRadius: BorderRadius.circular(VegaColors.radius),
         ),
       ),
     ),
@@ -473,8 +475,9 @@ class MyTheme {
     useMaterial3: false,
     brightness: Brightness.dark,
     hoverColor: Color.fromARGB(255, 45, 46, 53),
-    scaffoldBackgroundColor: Color(0xFF18191E),
-    dialogBackgroundColor: Color(0xFF18191E),
+    scaffoldBackgroundColor: VegaColors.darkBg,
+    primaryColor: VegaColors.darkAccent,
+    dialogBackgroundColor: VegaColors.darkCard,
     appBarTheme: AppBarTheme(
       shadowColor: Colors.transparent,
     ),
@@ -510,7 +513,7 @@ class MyTheme {
         color: accent80,
       ),
     ),
-    cardColor: Color(0xFF24252B),
+    cardColor: VegaColors.darkCard,
     visualDensity: VisualDensity.adaptivePlatformDensity,
     tabBarTheme: const TabBarTheme(
       labelColor: Colors.white70,

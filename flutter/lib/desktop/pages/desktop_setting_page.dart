@@ -28,6 +28,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import 'package:flutter_hbb/vega_links.dart';
+import 'package:flutter_hbb/vega_theme.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -64,6 +65,13 @@ enum SettingsTabKey {
 
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
+
+  /// Vega：设置侧栏隐藏的分组开关。页面代码全部保留，只在 tabKeys 里条件跳过。
+  /// Plugin 分组当前版本尚未提供页面，接入时把 [showPluginTab] 打开并把
+  /// SettingsTabKey.plugin 补进枚举与 tabKeys 即可。
+  static const bool showPluginTab = false;
+  static const bool showAccountTab = false;
+
   static final List<SettingsTabKey> tabKeys = [
     if (bind.mainGetBuildinOption(key: kOptionHideGeneralSetting) != 'Y')
       SettingsTabKey.general,
@@ -76,7 +84,8 @@ class DesktopSettingPage extends StatefulWidget {
         bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
       SettingsTabKey.network,
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
-    if (!bind.isDisableAccount()) SettingsTabKey.account,
+    // Vega：Account 分组暂不对外展示（代码保留，条件跳过）。
+    if (showAccountTab && !bind.isDisableAccount()) SettingsTabKey.account,
     if (isWindows &&
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideRemotePrinterSetting) != 'Y')
@@ -346,19 +355,49 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   }
 
   Widget _listView({required List<_TabInfo> tabs}) {
+    final palette = VegaColors.of(context);
     final scrollController = ScrollController();
+    // iOS 分组列表：整块圆角卡片，行间细分隔线，选中项主色。
     return ListView(
       controller: scrollController,
-      children: tabs.map((tab) => _listItem(tab: tab)).toList(),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.card,
+            borderRadius: BorderRadius.circular(palette.radius),
+            border: Border.all(color: palette.separator, width: 0.8),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(palette.radius),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < tabs.length; i++) ...[
+                  if (i > 0)
+                    Divider(
+                      height: 0.8,
+                      thickness: 0.8,
+                      indent: 42,
+                      endIndent: 0,
+                      color: palette.separator,
+                    ),
+                  _listItem(tab: tabs[i], palette: palette),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _listItem({required _TabInfo tab}) {
+  Widget _listItem({required _TabInfo tab, required VegaPalette palette}) {
     return Obx(() {
-      bool selected = tab.key == selectedTab.value;
-      return SizedBox(
-        width: _kTabWidth,
-        height: _kTabHeight,
+      final selected = tab.key == selectedTab.value;
+      return Material(
+        color:
+            selected ? palette.accent.withOpacity(0.10) : Colors.transparent,
         child: InkWell(
           onTap: () {
             if (selectedTab.value != tab.key) {
@@ -370,25 +409,35 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
             }
             selectedTab.value = tab.key;
           },
-          child: Row(children: [
-            Container(
-              width: 4,
-              height: _kTabHeight * 0.7,
-              color: selected ? _accentColor : null,
-            ),
-            Icon(
-              selected ? tab.selected : tab.unselected,
-              color: selected ? _accentColor : null,
-              size: 20,
-            ).marginOnly(left: 13, right: 10),
-            Text(
-              translate(tab.label),
-              style: TextStyle(
-                  color: selected ? _accentColor : null,
-                  fontWeight: FontWeight.w400,
-                  fontSize: _kContentFontSize),
-            ),
-          ]),
+          child: SizedBox(
+            height: _kTabHeight,
+            child: Row(children: [
+              const SizedBox(width: 12),
+              Icon(
+                selected ? tab.selected : tab.unselected,
+                color: selected ? palette.accent : palette.secondary,
+                size: 19,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  translate(tab.label),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? palette.accent : palette.text,
+                    fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+                    fontSize: _kContentFontSize,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: selected ? palette.accent : palette.secondary,
+              ).marginOnly(right: 10),
+            ]),
+          ),
         ),
       );
     });
