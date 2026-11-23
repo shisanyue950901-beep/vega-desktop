@@ -41,7 +41,11 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   double? get height => bind.isIncomingOnly() ? null : em * 3;
 
   void onUsePublicServerGuide() {
-    const url = "https://rustdesk.com/pricing";
+    // Vega fork：上游定价外链关闭（kUpstreamPricingUrl 为空），直接返回。
+    const url = kUpstreamPricingUrl;
+    if (url.isEmpty) {
+      return;
+    }
     canLaunchUrlString(url).then((can) {
       if (can) {
         launchUrlString(url);
