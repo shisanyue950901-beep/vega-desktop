@@ -229,8 +229,9 @@ class _ConnectionPageState extends State<ConnectionPage>
     super.initState();
     _allPeersLoader.init(setState);
     _idFocusNode.addListener(onFocusChanged);
-    // 进页面就主动加载一次最近 peers，避免 chip 依赖其他页面的加载时机。
-    bind.mainLoadRecentPeers();
+    // 进页面就预加载全部 peers（含最近 / LAN / 地址簿），
+    // 避免 chip 与自动补全依赖其他页面的加载时机。
+    _allPeersLoader.getAllPeers();
     if (_idController.text.isEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         final lastRemoteId = await bind.mainGetLastRemoteId();
@@ -595,122 +596,122 @@ class _ConnectionPageState extends State<ConnectionPage>
                     );
                   },
                 )),
-              ],
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              height: 40.0,
-              child: ElevatedButton(
-                onPressed: () {
-                  onConnect();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: palette.accent,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 40.0,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      onConnect();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: palette.accent,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text(
+                      '连接',
+                      style:
+                          TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ),
-                child: const Text(
-                  '连接',
-                  style:
-                      TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              height: 40.0,
-              width: 34.0,
-              decoration: BoxDecoration(
-                border: Border.all(color: palette.separator, width: 0.8),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Center(
-                child: StatefulBuilder(
-                  builder: (context, setState) {
-                    var offset = Offset(0, 0);
-                    return Obx(() => InkWell(
-                          child: _menuOpen.value
-                              ? Transform.rotate(
-                                  angle: pi,
-                                  child: Icon(IconFont.more, size: 14),
+                const SizedBox(width: 6),
+                Container(
+                  height: 40.0,
+                  width: 34.0,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: palette.separator, width: 0.8),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Center(
+                    child: StatefulBuilder(
+                      builder: (context, setState) {
+                        var offset = Offset(0, 0);
+                        return Obx(() => InkWell(
+                              child: _menuOpen.value
+                                  ? Transform.rotate(
+                                      angle: pi,
+                                      child: Icon(IconFont.more, size: 14),
+                                    )
+                                  : Icon(IconFont.more, size: 14),
+                              onTapDown: (e) {
+                                offset = e.globalPosition;
+                              },
+                              onTap: () async {
+                                _menuOpen.value = true;
+                                final x = offset.dx;
+                                final y = offset.dy;
+                                await mod_menu
+                                    .showMenu(
+                                  context: context,
+                                  position: RelativeRect.fromLTRB(x, y, x, y),
+                                  items: [
+                                    (
+                                      'Transfer file',
+                                      () => onConnect(isFileTransfer: true)
+                                    ),
+                                    (
+                                      'View camera',
+                                      () => onConnect(isViewCamera: true)
+                                    ),
+                                    (
+                                      '${translate('Terminal')} (beta)',
+                                      () => onConnect(isTerminal: true)
+                                    ),
+                                    // `connect` routes this through the
+                                    // desktop path only; the peer card gates
+                                    // it the same way.
+                                    if (isDesktop)
+                                      (
+                                        'TCP tunneling',
+                                        () => onConnect(isTcpTunneling: true)
+                                      ),
+                                  ]
+                                      .map<MenuEntryBase<String>>(
+                                          (e) => MenuEntryButton<String>(
+                                            childBuilder: (TextStyle? style) =>
+                                                Text(
+                                              translate(e.$1),
+                                              style: style,
+                                            ),
+                                            proc: () => e.$2(),
+                                            padding: EdgeInsets.symmetric(
+                                                horizontal:
+                                                    kDesktopMenuPadding.left),
+                                            dismissOnClicked: true,
+                                          ))
+                                      .followedBy([
+                                        MenuEntryDivider<String>(),
+                                        _requestApprovalMenu(context),
+                                      ])
+                                      .map((e) => e.build(
+                                          context,
+                                          const MenuConfig(
+                                              commonColor: CustomPopupMenuTheme
+                                                  .commonColor,
+                                              height:
+                                                  CustomPopupMenuTheme.height,
+                                              dividerHeight:
+                                                  CustomPopupMenuTheme
+                                                      .dividerHeight)))
+                                      .expand((i) => i)
+                                      .toList(),
+                                  elevation: 8,
                                 )
-                              : Icon(IconFont.more, size: 14),
-                          onTapDown: (e) {
-                            offset = e.globalPosition;
-                          },
-                          onTap: () async {
-                            _menuOpen.value = true;
-                            final x = offset.dx;
-                            final y = offset.dy;
-                            await mod_menu
-                                .showMenu(
-                              context: context,
-                              position: RelativeRect.fromLTRB(x, y, x, y),
-                              items: [
-                                (
-                                  'Transfer file',
-                                  () => onConnect(isFileTransfer: true)
-                                ),
-                                (
-                                  'View camera',
-                                  () => onConnect(isViewCamera: true)
-                                ),
-                                (
-                                  '${translate('Terminal')} (beta)',
-                                  () => onConnect(isTerminal: true)
-                                ),
-                                // `connect` routes this through the
-                                // desktop path only; the peer card gates
-                                // it the same way.
-                                if (isDesktop)
-                                  (
-                                    'TCP tunneling',
-                                    () => onConnect(isTcpTunneling: true)
-                                  ),
-                              ]
-                                  .map<MenuEntryBase<String>>(
-                                      (e) => MenuEntryButton<String>(
-                                        childBuilder: (TextStyle? style) =>
-                                            Text(
-                                          translate(e.$1),
-                                          style: style,
-                                        ),
-                                        proc: () => e.$2(),
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal:
-                                                kDesktopMenuPadding.left),
-                                        dismissOnClicked: true,
-                                      ))
-                                  .followedBy([
-                                    MenuEntryDivider<String>(),
-                                    _requestApprovalMenu(context),
-                                  ])
-                                  .map((e) => e.build(
-                                      context,
-                                      const MenuConfig(
-                                          commonColor: CustomPopupMenuTheme
-                                              .commonColor,
-                                          height:
-                                              CustomPopupMenuTheme.height,
-                                          dividerHeight:
-                                              CustomPopupMenuTheme
-                                                  .dividerHeight)))
-                                  .expand((i) => i)
-                                  .toList(),
-                              elevation: 8,
-                            )
-                                .then((_) {
-                              _menuOpen.value = false;
-                            });
-                          },
-                        ));
-                  },
+                                    .then((_) {
+                                  _menuOpen.value = false;
+                                });
+                              },
+                            ));
+                      },
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
         ),
