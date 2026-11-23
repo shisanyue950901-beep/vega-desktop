@@ -19,6 +19,11 @@ const String kUpstreamPrivacyUrl = '';
 const String kUpstreamReleaseUrl = '';
 const String kUpstreamChangelogUrl = '';
 
+/// 上游版本检查 / 自动更新开关（与 src/common.rs 的
+/// `ENABLE_UPSTREAM_UPDATE_CHECK` 对应）：关闭时所有更新入口不渲染，
+/// 功能代码保持不动。
+const bool kEnableUpstreamUpdateCheck = false;
+
 /// 本 fork 的依据与许可，用于「关于」页展示。
 const String kVegaLicenseName = 'AGPL-3.0';
 const String kVegaUpstreamName = 'RustDesk';
