@@ -250,7 +250,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("elevation_username_tip", "Input username or domain\\username"),
         ("allow-insecure-tls-fallback-tip", "By default, Vega verifies the server certificate for protocols using TLS.\nWith this option enabled, Vega will fall back to skipping the verification step and proceed in case of verification failure."),
         ("disable-udp-tip", "Controls whether to use TCP only.\nWhen this option enabled, Vega will not use UDP 21116 any more, TCP 21116 will be used instead."),
-        ("server-oss-not-support-tip", "NOTE: Vega server OSS doesn't include this feature."),
+        ("server-oss-not-support-tip", "NOTE: the open-source server doesn't include this feature."),
         ("note-at-conn-end-tip", "Ask for note at end of connection"),
         ("rel-mouse-not-supported-peer-tip", "Relative mouse mode is not supported by the connected peer."),
         ("rel-mouse-not-ready-tip", "Relative mouse mode is not ready yet. Please try again."),
