@@ -139,7 +139,7 @@ const OFFICIAL_RENDEZVOUS_HOSTS: &[&str] = &[
 ];
 
 // Vega: 判断某个 rendezvous 主机（可带端口）是否为官方 RustDesk 节点。
-fn is_official_rendezvous_server(host: &str) -> bool {
+pub fn is_official_rendezvous_server(host: &str) -> bool {
     let host = host.trim();
     if host.is_empty() {
         return false;

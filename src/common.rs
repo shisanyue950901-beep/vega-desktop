@@ -2182,6 +2182,12 @@ pub async fn get_key(sync: bool) -> String {
             return lic.key;
         }
     }
+    // Vega: 未配置自定义 rendezvous 服务（或指向官方节点）时，始终使用预置公钥，
+    // 忽略本地保存的 key。
+    let custom_rendezvous = Config::get_option("custom-rendezvous-server");
+    if custom_rendezvous.is_empty() || config::is_official_rendezvous_server(&custom_rendezvous) {
+        return config::RS_PUB_KEY.to_owned();
+    }
     #[cfg(target_os = "ios")]
     let mut key = Config::get_option("key");
     #[cfg(not(target_os = "ios"))]
