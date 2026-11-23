@@ -2296,15 +2296,22 @@ class _AccountState extends State<_Account> {
   }
 
   Widget accountAction() {
-    return Obx(() => _Button(
-        gFFI.userModel.userName.value.isEmpty
-            ? 'Login'
-            : '${translate('Logout')} (${gFFI.userModel.accountLabelWithHandle})',
-        () => {
-              gFFI.userModel.userName.value.isEmpty
-                  ? loginDialog()
-                  : logOutConfirmDialog()
-            }));
+    return Obx(() {
+      if (gFFI.userModel.userName.value.isNotEmpty) {
+        return _Button(
+            '${translate('Logout')} (${gFFI.userModel.accountLabelWithHandle})',
+            () => logOutConfirmDialog());
+      }
+      // API 地址为空（bind.mainGetApiServer 返回空串）时不能登录，隐藏登录入口。
+      return FutureBuilder<String>(
+          future: bind.mainGetApiServer(),
+          builder: (context, snapshot) {
+            if (snapshot.data?.isNotEmpty != true) {
+              return const SizedBox.shrink();
+            }
+            return _Button('Login', () => loginDialog());
+          });
+    });
   }
 
   Widget useInfo() {
