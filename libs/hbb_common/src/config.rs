@@ -1096,7 +1096,14 @@ impl Config {
     pub fn get_rendezvous_server() -> String {
         let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
         if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_option("custom-rendezvous-server");
+            // Vega: custom-rendezvous-server 指向官方 RustDesk 节点时视为未设置，
+            // 回落到 Vega 预置；自建地址原样保留。
+            let custom = Self::get_option("custom-rendezvous-server");
+            if is_official_rendezvous_server(&custom) {
+                log::debug!("Ignoring upstream custom-rendezvous-server: {:?}", custom);
+            } else {
+                rendezvous_server = custom;
+            }
         }
         if rendezvous_server.is_empty() {
             rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
@@ -1128,7 +1135,8 @@ impl Config {
             return vec![s];
         }
         let s = Self::get_option("custom-rendezvous-server");
-        if !s.is_empty() {
+        // Vega: 官方 RustDesk 节点视为未设置，继续走后续回落逻辑；自建地址保留。
+        if !s.is_empty() && !is_official_rendezvous_server(&s) {
             return vec![s];
         }
         let s = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
