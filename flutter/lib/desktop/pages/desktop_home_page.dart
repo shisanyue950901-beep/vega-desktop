@@ -664,7 +664,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                                   ])
                             ]
                           : <Widget>[]) +
-                      (help != null
+                      // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
+                      (help != null && link != null && kUpstreamDocsUrl.isNotEmpty
                           ? <Widget>[
                               Center(
                                   child: InkWell(
