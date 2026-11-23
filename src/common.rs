@@ -53,6 +53,15 @@ pub type NotifyMessageBox = fn(String, String, String, String) -> dyn Future<Out
 // the executable name of the portable version
 pub const PORTABLE_APPNAME_RUNTIME_ENV_KEY: &str = "RUSTDESK_APPNAME";
 
+/// --- Vega fork switches -------------------------------------------------
+/// 本 fork 不再访问上游 RustDesk 官方服务：版本检查、升级提示、
+/// rs-ny 等官方中继/ID 服务器、官网/文档/下载/捐赠外链一律关闭。
+/// 需要恢复时改成 true 即可，功能代码保持不动。
+pub const ENABLE_UPSTREAM_UPDATE_CHECK: bool = false;
+pub const ENABLE_UPSTREAM_LINKS: bool = false;
+/// Vega 预置中继服务器（也可由 OVERWRITE_SETTINGS 覆盖）。
+pub const VEGA_RELAY_SERVER: &str = "60.205.95.98:21117";
+
 pub const PLATFORM_WINDOWS: &str = "Windows";
 pub const PLATFORM_LINUX: &str = "Linux";
 pub const PLATFORM_MACOS: &str = "Mac OS";
@@ -1058,6 +1067,10 @@ pub fn is_modifier(evt: &KeyEvent) -> bool {
 }
 
 pub fn check_software_update() {
+    if !ENABLE_UPSTREAM_UPDATE_CHECK {
+        clear_software_update_url();
+        return;
+    }
     if is_custom_client() {
         return;
     }
@@ -1177,6 +1190,10 @@ fn process_software_update_check_response(bytes: Bytes) -> ResultType<()> {
 // Because the url is always `https://api.rustdesk.com/version/latest`.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
+    if !ENABLE_UPSTREAM_UPDATE_CHECK {
+        clear_software_update_url();
+        return Ok(());
+    }
     let (request, url) =
         hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
     let proxy_conf = Config::get_socks();
@@ -1307,6 +1324,9 @@ fn get_api_server_(api: String, custom: String) -> String {
         } else {
             return format!("http://{}", s);
         }
+    }
+    if !ENABLE_UPSTREAM_LINKS {
+        return "".to_owned();
     }
     "https://admin.rustdesk.com".to_owned()
 }
@@ -2506,7 +2526,21 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
     ThrottledInterval::new(i)
 }
 
+/// Vega: 预置服务器设置，走上游已有的 DEFAULT/OVERWRITE settings 机制。
+/// 每次启动都写入，确保 relay-server 指向自建服务器。
+pub fn apply_vega_defaults() {
+    config::OVERWRITE_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_RELAY_SERVER.to_owned(), VEGA_RELAY_SERVER.to_owned());
+    config::DEFAULT_SETTINGS.write().unwrap().insert(
+        keys::OPTION_RELAY_SERVER.to_owned(),
+        VEGA_RELAY_SERVER.to_owned(),
+    );
+}
+
 pub fn load_custom_client() {
+    apply_vega_defaults();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
