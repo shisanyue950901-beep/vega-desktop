@@ -254,9 +254,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           child: Stack(
             children: [
               const Positioned.fill(child: VegaStars()),
-              Padding(
+              // Vega 修改：仅接入模式下卡片在可滚动区域（高度无界），不能用 Spacer。
+              LayoutBuilder(builder: (context, box) => Padding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 12, 18),
                 child: Column(
+                  mainAxisSize: box.hasBoundedHeight
+                      ? MainAxisSize.max
+                      : MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
@@ -298,7 +302,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           ),
                       ],
                     ),
-                    const Spacer(),
+                    if (box.hasBoundedHeight)
+                      const Spacer()
+                    else
+                      const SizedBox(height: 14),
                     Text('设备 ID', style: labelStyle),
                     const SizedBox(height: 2),
                     // Vega 修改：InkWell 可 Tab 聚焦、Enter/Space 触发复制。
@@ -401,7 +408,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           borderRadius: BorderRadius.circular(12),
                           onTap: () => copy(pwdReady
                               ? '设备 ID：$idText\n临时密码：$pwdText'
-                              : '设备 ID：$idText'),
+                              : idText),
                           child: Container(
                             height: 42,
                             alignment: Alignment.center,
@@ -427,7 +434,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     ),
                   ],
                 ),
-              ),
+              )),
             ],
           ),
         );
@@ -443,12 +450,33 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       return v.isEmpty ? d : v;
     }
 
+    // 未自定义 ID 服务器时，运行时用的是 Vega 预置中继与公钥：二维码也整组用预置值，
+    // 避免把残留的旧 key 与预置地址拼在一起。
+    final custom = opt('custom-rendezvous-server', '').isNotEmpty;
+    // API 地址只保留 scheme://host[:port]/path，去掉账号密码与查询参数，避免泄露凭据。
+    String safeApi(String raw) {
+      final u = Uri.tryParse(raw);
+      if (u == null || !u.hasScheme || u.host.isEmpty) return '';
+      return Uri(
+              scheme: u.scheme,
+              host: u.host,
+              port: u.hasPort ? u.port : null,
+              path: u.path)
+          .toString();
+    }
+
     final data = 'config=' +
         ServerConfig(
-          idServer: opt('custom-rendezvous-server', '60.205.95.98'),
-          relayServer: opt('relay-server', '60.205.95.98:21117'),
-          apiServer: opt('api-server', ''),
-          key: opt('key', 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE='),
+          idServer: custom
+              ? opt('custom-rendezvous-server', '')
+              : '60.205.95.98',
+          relayServer: custom
+              ? opt('relay-server', '')
+              : '60.205.95.98:21117',
+          apiServer: custom ? safeApi(opt('api-server', '')) : '',
+          key: custom
+              ? opt('key', '')
+              : 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE=',
         ).encode();
     gFFI.dialogManager.show((setState, close, context) {
       final palette = VegaColors.of(context);

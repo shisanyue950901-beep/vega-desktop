@@ -329,7 +329,8 @@ class _ConnectionPageState extends State<ConnectionPage>
           if (widget.header != null) widget.header!,
           if (widget.banner != null) widget.banner!,
           SizedBox(
-            height: 206,
+            // Vega：设备卡含临时密码行约需 219px，留余量
+            height: 224,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

@@ -255,7 +255,7 @@ jobs:
           # 截图按中文界面渲染（与国内用户一致）：写入 LocalConfig 的 lang 选项。
           $cfgDir = Join-Path $env:APPDATA "Vega\config"
           New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
-          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`n"
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'light'`n"
           Add-Type -TypeDefinition @"
           using System; using System.Runtime.InteropServices;
           public static class VegaWin {
@@ -317,11 +317,11 @@ jobs:
             }
             if ($out) { Get-Item $out | Format-List FullName, Length }
           }
-          Invoke-VegaShot "shot-home.png"
+          try { Invoke-VegaShot "shot-home.png" } catch { Write-Host "light capture failed: $_" }
           Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
-          Invoke-VegaShot "shot-dark.png"
+          try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
 
       - name: Upload vega-screenshots
         continue-on-error: true
