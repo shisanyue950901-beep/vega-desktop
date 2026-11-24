@@ -329,19 +329,24 @@ class _ConnectionPageState extends State<ConnectionPage>
           if (widget.header != null) widget.header!,
           if (widget.banner != null) widget.banner!,
           SizedBox(
-            height: 214,
+            height: 206,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (widget.deviceCard != null)
                   Expanded(flex: 11, child: widget.deviceCard!),
                 if (widget.deviceCard != null) const SizedBox(width: 16),
-                Expanded(flex: 10, child: _buildRemoteIDTextField(context)),
+                Expanded(
+                    flex: 10,
+                    child: VegaEntrance(
+                        delayMs: 90,
+                        child: VegaHoverLift(
+                            child: _buildRemoteIDTextField(context)))),
               ],
             ),
           ).paddingSymmetric(horizontal: 24),
           Padding(
-            padding: const EdgeInsets.fromLTRB(28, 18, 24, 8),
+            padding: const EdgeInsets.fromLTRB(28, 14, 24, 8),
             child: Row(
               children: [
                 Text(
@@ -356,7 +361,9 @@ class _ConnectionPageState extends State<ConnectionPage>
             ),
           ),
           Expanded(
-            child: Container(
+            child: VegaEntrance(
+              delayMs: 180,
+              child: Container(
               margin: const EdgeInsets.fromLTRB(24, 0, 24, 12),
               padding: const EdgeInsets.fromLTRB(10, 4, 6, 0),
               decoration: BoxDecoration(
@@ -366,6 +373,7 @@ class _ConnectionPageState extends State<ConnectionPage>
               ),
               clipBehavior: Clip.antiAlias,
               child: PeerTabPage(),
+            ),
             ),
           ),
           if (!isOutgoingOnly) const Divider(height: 1),

@@ -21,6 +21,7 @@ import 'package:flutter_hbb/utils/platform_channel.dart';
 import 'package:flutter_hbb/vega_theme.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
@@ -81,7 +82,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               ? null
               : ChangeNotifierProvider.value(
                   value: gFFI.serverModel,
-                  child: buildDeviceCard(context),
+                  child: VegaEntrance(
+                    child: VegaHoverLift(child: buildDeviceCard(context)),
+                  ),
                 ),
         ),
       );
@@ -277,6 +280,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                             ),
                           ),
                         ),
+                        buildCardIconButton(
+                          context: context,
+                          onHero: true,
+                          icon: Icons.qr_code_2_rounded,
+                          tooltip: '手机扫码配置',
+                          onTap: showVegaQrDialog,
+                        ),
                         if (!bind.isDisableSettings())
                           buildCardIconButton(
                             context: context,
@@ -425,11 +435,74 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
+  /// Vega 修改：手机扫码——二维码内容与 RustDesk 手机端「扫码导入服务器」格式一致
+  /// （config= + ServerConfig.encode()），未自定义时用 Vega 预置中继与公钥。
+  void showVegaQrDialog() {
+    String opt(String k, String d) {
+      final v = bind.mainGetOptionSync(key: k).trim();
+      return v.isEmpty ? d : v;
+    }
+
+    final data = 'config=' +
+        ServerConfig(
+          idServer: opt('custom-rendezvous-server', '60.205.95.98'),
+          relayServer: opt('relay-server', '60.205.95.98:21117'),
+          apiServer: opt('api-server', ''),
+          key: opt('key', 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE='),
+        ).encode();
+    gFFI.dialogManager.show((setState, close, context) {
+      final palette = VegaColors.of(context);
+      return CustomAlertDialog(
+        title: const Text('手机扫码，一键配置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: palette.separator),
+              ),
+              child: QrImageView(
+                data: data,
+                version: QrVersions.auto,
+                size: 196,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.circle,
+                  color: Color(0xFF2B2378),
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.circle,
+                  color: Color(0xFF2B2378),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: 260,
+              child: Text(
+                '手机打开 RustDesk → 设置 → ID/中继服务器 → 右上角扫码，扫完即可和这台电脑互联。',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12, height: 1.5, color: palette.secondary),
+              ),
+            ),
+          ],
+        ),
+        actions: [dialogButton('OK', onPressed: close)],
+        onSubmit: close,
+        onCancel: close,
+      );
+    });
+  }
+
   /// Vega 修改：顶部品牌栏——✦ 标志 + Vega 字标 + 设置。
   Widget buildVegaHeader(BuildContext context) {
     final palette = VegaColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 12, 18, 12),
+      padding: const EdgeInsets.fromLTRB(24, 10, 18, 8),
       child: Row(
         children: [
           const VegaMark(size: 26),
@@ -729,8 +802,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     final palette = VegaColors.of(context);
     final showClose = closeButton != null && closeButton == true;
     return Container(
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 14),
-      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
       decoration: BoxDecoration(
         color: palette.card,
         borderRadius: BorderRadius.circular(14),
