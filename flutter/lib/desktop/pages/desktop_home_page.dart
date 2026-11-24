@@ -450,9 +450,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       return v.isEmpty ? d : v;
     }
 
-    // 未自定义 ID 服务器时，运行时用的是 Vega 预置中继与公钥：二维码也整组用预置值，
-    // 避免把残留的旧 key 与预置地址拼在一起。
-    final custom = opt('custom-rendezvous-server', '').isNotEmpty;
+    // 与运行时取值一致：ID 服务器未填用预置；key 仅在自定义 ID 服务器且填了 key 时用自填值，
+    // 否则用 Vega 内置公钥（运行时同样回退到内置公钥）；API 地址独立生效。
+    const presetHost = '60.205.95.98';
+    const presetKey = 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE=';
+    final customId = opt('custom-rendezvous-server', '');
+    final customKey = opt('key', '');
     // API 地址只保留 scheme://host[:port]/path，去掉账号密码与查询参数，避免泄露凭据。
     String safeApi(String raw) {
       final u = Uri.tryParse(raw);
@@ -467,16 +470,14 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
     final data = 'config=' +
         ServerConfig(
-          idServer: custom
-              ? opt('custom-rendezvous-server', '')
-              : '60.205.95.98',
-          relayServer: custom
+          idServer: customId.isNotEmpty ? customId : presetHost,
+          relayServer: customId.isNotEmpty
               ? opt('relay-server', '')
-              : '60.205.95.98:21117',
-          apiServer: custom ? safeApi(opt('api-server', '')) : '',
-          key: custom
-              ? opt('key', '')
-              : 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE=',
+              : '$presetHost:21117',
+          apiServer: safeApi(opt('api-server', '')),
+          key: customId.isNotEmpty && customKey.isNotEmpty
+              ? customKey
+              : presetKey,
         ).encode();
     gFFI.dialogManager.show((setState, close, context) {
       final palette = VegaColors.of(context);
