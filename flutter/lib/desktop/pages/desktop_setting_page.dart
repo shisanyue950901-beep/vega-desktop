@@ -648,7 +648,8 @@ class _GeneralState extends State<_General> {
   }
 
   Widget service() {
-    if (bind.isOutgoingOnly()) {
+    // Vega 修改：服务开关已放在「远程协助」页的「允许他人远程协助」，设置里不再重复。
+    if (bind.isOutgoingOnly() || vegaSettingsEmbedded) {
       return const Offstage();
     }
 

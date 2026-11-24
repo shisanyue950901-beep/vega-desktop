@@ -32,11 +32,11 @@ class PeerTabModel with ChangeNotifier {
   ];
   static const List<IconData> icons = [
     // Vega: 圆角线性图标，与首页风格一致
-    Icons.history_rounded,
-    Icons.star_rounded,
-    Icons.lan_rounded,
-    Icons.contacts_rounded,
-    Icons.devices_rounded,
+    Icons.history,
+    Icons.star_outline_rounded,
+    Icons.lan_outlined,
+    Icons.contacts_outlined,
+    Icons.devices_outlined,
   ];
   List<bool> isEnabled = List.from([
     true,

@@ -163,6 +163,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           child: Obx(() {
             final current = vegaNavIndex.value;
             return Stack(
+              fit: StackFit.expand,
               children: [
                 for (var i = 0; i < pages.length; i++)
                   Offstage(
