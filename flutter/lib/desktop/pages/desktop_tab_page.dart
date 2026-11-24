@@ -20,6 +20,11 @@ class DesktopTabPage extends StatefulWidget {
 
   static void onAddSetting(
       {SettingsTabKey initialPage = SettingsTabKey.general}) {
+    // Vega 修改：设置已嵌入主界面，切过去即可，不再开新标签页。
+    if (vegaSettingsEmbedded) {
+      DesktopSettingPage.vegaShowEmbedded(initialPage);
+      return;
+    }
     try {
       DesktopTabController tabController = Get.find<DesktopTabController>();
       tabController.add(TabInfo(

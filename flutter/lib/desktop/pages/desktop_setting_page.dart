@@ -63,6 +63,11 @@ enum SettingsTabKey {
   about,
 }
 
+/// Vega 修改：设置嵌入主界面右侧（左侧栏「设置」），不再另开标签页。
+/// 0 = 远程协助，1 = 我的设备，2 = 设置。
+final RxInt vegaNavIndex = 0.obs;
+bool vegaSettingsEmbedded = false;
+
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
 
@@ -93,13 +98,35 @@ class DesktopSettingPage extends StatefulWidget {
     SettingsTabKey.about,
   ];
 
-  DesktopSettingPage({Key? key, required this.initialTabkey}) : super(key: key);
+  final bool vegaEmbedded;
+
+  DesktopSettingPage(
+      {Key? key, required this.initialTabkey, this.vegaEmbedded = false})
+      : super(key: key);
+
+  /// Vega：切到主界面里的设置，并跳到指定分组。
+  static void vegaShowEmbedded(SettingsTabKey page) {
+    vegaNavIndex.value = 2;
+    final index = tabKeys.indexOf(page);
+    if (index < 0) return;
+    if (Get.isRegistered<PageController>(tag: _kSettingPageControllerTag)) {
+      final c = Get.find<PageController>(tag: _kSettingPageControllerTag);
+      if (c.hasClients) c.jumpToPage(index);
+    }
+    if (Get.isRegistered<Rx<SettingsTabKey>>(tag: _kSettingPageTabKeyTag)) {
+      Get.find<Rx<SettingsTabKey>>(tag: _kSettingPageTabKeyTag).value = page;
+    }
+  }
 
   @override
   State<DesktopSettingPage> createState() =>
       _DesktopSettingPageState(initialTabkey);
 
   static void switch2page(SettingsTabKey page) {
+    if (vegaSettingsEmbedded) {
+      vegaShowEmbedded(page);
+      return;
+    }
     try {
       int index = tabKeys.indexOf(page);
       if (index == -1) {
@@ -289,7 +316,9 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: _buildBlock(
-        children: <Widget>[
+        children: widget.vegaEmbedded
+            ? <Widget>[Expanded(child: _vegaEmbeddedBody(context))]
+            : <Widget>[
           SizedBox(
             width: _kTabWidth,
             child: Column(
@@ -313,6 +342,81 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
         ],
       ),
     );
+  }
+
+  /// Vega：嵌入主界面时的布局——大标题 + 顶部分组标签 + 内容。
+  Widget _vegaEmbeddedBody(BuildContext context) {
+    final palette = VegaColors.of(context);
+    final tabs = _settingTabs();
+    return Container(
+      color: palette.bg,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
+            child: Text('设置',
+                style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: palette.text)),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [for (final t in tabs) _vegaTopTab(t, palette)]),
+          ),
+          Divider(height: 1, thickness: 1, color: palette.separator)
+              .marginSymmetric(horizontal: 28),
+          Expanded(
+            child: PageView(
+              controller: controller,
+              physics: const NeverScrollableScrollPhysics(),
+              children: _children(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _vegaTopTab(_TabInfo tab, VegaPalette palette) {
+    return Obx(() {
+      final selected = tab.key == selectedTab.value;
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          final index = DesktopSettingPage.tabKeys.indexOf(tab.key);
+          if (index < 0) return;
+          controller.jumpToPage(index);
+          selectedTab.value = tab.key;
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(translate(tab.label),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w400,
+                      color: selected ? palette.text : palette.secondary)),
+              const SizedBox(height: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                height: 3,
+                width: selected ? 20 : 0,
+                decoration: BoxDecoration(
+                    color: palette.accent,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 
   Widget _header(BuildContext context) {

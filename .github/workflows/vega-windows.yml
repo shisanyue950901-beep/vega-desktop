@@ -320,6 +320,13 @@ jobs:
             if ($out) { Get-Item $out | Format-List FullName, Length }
           }
           try { Invoke-VegaShot "shot-home.png" } catch { Write-Host "light capture failed: $_" }
+          foreach ($nav in @(@(1, "shot-devices.png"), @(2, "shot-settings.png"))) {
+            Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep 2
+            $env:VEGA_SHOT_NAV = "$($nav[0])"
+            try { Invoke-VegaShot $nav[1] } catch { Write-Host "nav capture failed: $_" }
+          }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
           Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2

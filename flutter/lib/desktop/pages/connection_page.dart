@@ -197,8 +197,16 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
 
 /// Connection page for connecting to a remote peer.
 class ConnectionPage extends StatefulWidget {
-  const ConnectionPage({Key? key, this.header, this.banner, this.deviceCard})
+  const ConnectionPage(
+      {Key? key,
+      this.header,
+      this.banner,
+      this.deviceCard,
+      this.vegaStacked = false})
       : super(key: key);
+
+  /// Vega 修改：「远程协助」页——本设备卡片在上、远程控制卡片在下，可滚动，不含设备列表。
+  final bool vegaStacked;
 
   /// Vega 修改：主界面单屏布局的顶栏、横幅与「本设备」卡片，由 DesktopHomePage 传入。
   final Widget? header;
@@ -322,6 +330,30 @@ class _ConnectionPageState extends State<ConnectionPage>
   Widget build(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
     final palette = VegaColors.of(context);
+    if (widget.vegaStacked) {
+      return Container(
+        color: palette.bg,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.header != null) widget.header!,
+              if (widget.banner != null) widget.banner!,
+              if (widget.deviceCard != null)
+                VegaEntrance(child: widget.deviceCard!)
+                    .paddingSymmetric(horizontal: 24),
+              if (widget.deviceCard != null) const SizedBox(height: 16),
+              VegaEntrance(
+                delayMs: 90,
+                child: SizedBox(
+                    height: 206, child: _buildRemoteIDTextField(context)),
+              ).paddingSymmetric(horizontal: 24),
+            ],
+          ),
+        ),
+      );
+    }
     return Container(
       color: palette.bg,
       child: Column(
