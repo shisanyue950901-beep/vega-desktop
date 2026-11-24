@@ -454,7 +454,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     // 否则用 Vega 内置公钥（运行时同样回退到内置公钥）；API 地址独立生效。
     const presetHost = '60.205.95.98';
     const presetKey = 'vshoQwJXPQncCbX+1EqpKpqpNp7ZvepyzGVCF2QfbuE=';
-    final customId = opt('custom-rendezvous-server', '');
+    // 与 hbb_common is_official_rendezvous_server 一致：官方 RustDesk 节点视为未设置。
+    final savedId = opt('custom-rendezvous-server', '');
+    final customId =
+        savedId.toLowerCase().contains('rustdesk.com') ? '' : savedId;
     final customKey = opt('key', '');
     // API 地址只保留 scheme://host[:port]/path，去掉账号密码与查询参数，避免泄露凭据。
     String safeApi(String raw) {
