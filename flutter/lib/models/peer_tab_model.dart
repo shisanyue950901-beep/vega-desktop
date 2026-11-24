@@ -31,11 +31,12 @@ class PeerTabModel with ChangeNotifier {
     'Accessible devices',
   ];
   static const List<IconData> icons = [
-    Icons.access_time_filled,
-    Icons.star,
-    Icons.explore,
-    IconFont.addressBook,
-    IconFont.deviceGroupFill,
+    // Vega: 圆角线性图标，与首页风格一致
+    Icons.history_rounded,
+    Icons.star_rounded,
+    Icons.lan_rounded,
+    Icons.contacts_rounded,
+    Icons.devices_rounded,
   ];
   List<bool> isEnabled = List.from([
     true,

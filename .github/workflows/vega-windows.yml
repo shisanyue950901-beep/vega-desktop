@@ -252,52 +252,83 @@ jobs:
             Get-ChildItem -Path ./rustdesk -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
             exit 1
           }
-          Write-Host "Launching $exe"
-          $proc = Start-Process -FilePath $exe -PassThru
-          $out = $null
-          $ready = $false
-          $deadline = (Get-Date).AddSeconds(60)
-          while ((Get-Date) -lt $deadline) {
-            if ($proc.HasExited) { break }
-            try { $proc.Refresh() } catch { break }
-            if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
-              $ready = $true
-              break
+          # 截图按中文界面渲染（与国内用户一致）：写入 LocalConfig 的 lang 选项。
+          $cfgDir = Join-Path $env:APPDATA "Vega\config"
+          New-Item -ItemType Directory -Force -Path $cfgDir | Out-Null
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'light'`n"
+          Add-Type -TypeDefinition @"
+          using System; using System.Runtime.InteropServices;
+          public static class VegaWin {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+          }
+          "@
+          # Vega: 先浅色、再深色各截一张
+          function Invoke-VegaShot([string]$name) {
+            Write-Host "Launching $exe"
+            $proc = Start-Process -FilePath $exe -PassThru
+            $out = $null
+            $ready = $false
+            $deadline = (Get-Date).AddSeconds(60)
+            while ((Get-Date) -lt $deadline) {
+              if ($proc.HasExited) { break }
+              try { $proc.Refresh() } catch { break }
+              if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
+                $ready = $true
+                break
+              }
+              Start-Sleep -Milliseconds 500
             }
-            Start-Sleep -Milliseconds 500
-          }
-          if (-not $ready) {
-            Write-Host "vega window not ready within 60s or process exited, skip UI screenshot"
-            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-            exit 0
-          }
-          try {
-            Start-Sleep 2
-            Add-Type -AssemblyName System.Windows.Forms
-            Add-Type -AssemblyName System.Drawing
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            if (-not $ready) {
+              Write-Host "vega window not ready within 60s or process exited, skip UI screenshot"
+              if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+              return
+            }
             try {
-              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-              New-Item -ItemType Directory -Force -Path ./screenshots | Out-Null
-              $out = Join-Path (Resolve-Path ./screenshots) "shot-home.png"
-              $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+              $h = $proc.MainWindowHandle
+              [VegaWin]::ShowWindow($h, 9) | Out-Null
+              [VegaWin]::SetForegroundWindow($h) | Out-Null
+              Start-Sleep 3
+              $proc.Refresh()
+              if ($proc.HasExited -or $proc.MainWindowHandle -eq [IntPtr]::Zero) {
+                Write-Host "vega exited before capture, skip UI screenshot"
+                return
+              }
+              $r = New-Object VegaWin+RECT
+              [VegaWin]::GetWindowRect($proc.MainWindowHandle, [ref]$r) | Out-Null
+              $w = $r.R - $r.L; $hgt = $r.B - $r.T
+              if ($w -le 0 -or $hgt -le 0) { Write-Host "bad window rect, skip"; return }
+              Add-Type -AssemblyName System.Drawing
+              $bmp = New-Object System.Drawing.Bitmap $w, $hgt
+              $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+              try {
+                $gfx.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size $w, $hgt))
+                New-Item -ItemType Directory -Force -Path ./screenshots | Out-Null
+                $out = Join-Path (Resolve-Path ./screenshots) $name
+                $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+              } finally {
+                $gfx.Dispose()
+                $bmp.Dispose()
+              }
             } finally {
-              $gfx.Dispose()
-              $bmp.Dispose()
+              if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
             }
-          } finally {
-            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+            if ($out) { Get-Item $out | Format-List FullName, Length }
           }
-          Get-Item $out | Format-List FullName, Length
+          try { Invoke-VegaShot "shot-home.png" } catch { Write-Host "light capture failed: $_" }
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
 
       - name: Upload vega-screenshots
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: vega-screenshots
-          path: ./screenshots/shot-home.png
+          path: ./screenshots/*.png
           if-no-files-found: warn
 
       - name: Upload vega-windows-x64

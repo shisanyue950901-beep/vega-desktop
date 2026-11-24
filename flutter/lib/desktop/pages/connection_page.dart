@@ -197,7 +197,13 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
 
 /// Connection page for connecting to a remote peer.
 class ConnectionPage extends StatefulWidget {
-  const ConnectionPage({Key? key}) : super(key: key);
+  const ConnectionPage({Key? key, this.header, this.banner, this.deviceCard})
+      : super(key: key);
+
+  /// Vega 修改：主界面单屏布局的顶栏、横幅与「本设备」卡片，由 DesktopHomePage 传入。
+  final Widget? header;
+  final Widget? banner;
+  final Widget? deviceCard;
 
   @override
   State<ConnectionPage> createState() => _ConnectionPageState();
@@ -315,24 +321,66 @@ class _ConnectionPageState extends State<ConnectionPage>
   @override
   Widget build(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
-    return Column(
-      children: [
-        Expanded(
-            child: Column(
-          children: [
-            Row(
+    final palette = VegaColors.of(context);
+    return Container(
+      color: palette.bg,
+      child: Column(
+        children: [
+          if (widget.header != null) widget.header!,
+          if (widget.banner != null) widget.banner!,
+          SizedBox(
+            // Vega：设备卡含临时密码行约需 219px，留余量
+            height: widget.deviceCard != null ? 224 : 206,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Flexible(child: _buildRemoteIDTextField(context)),
+                if (widget.deviceCard != null)
+                  Expanded(flex: 11, child: widget.deviceCard!),
+                if (widget.deviceCard != null) const SizedBox(width: 16),
+                Expanded(
+                    flex: 10,
+                    child: VegaEntrance(
+                        delayMs: 90,
+                        child: VegaHoverLift(
+                            child: _buildRemoteIDTextField(context)))),
               ],
-            ).marginOnly(top: 22),
-            SizedBox(height: 12),
-            Divider().paddingOnly(right: 12),
-            Expanded(child: PeerTabPage()),
-          ],
-        ).paddingOnly(left: 12.0)),
-        if (!isOutgoingOnly) const Divider(height: 1),
-        if (!isOutgoingOnly) OnlineStatusWidget()
-      ],
+            ),
+          ).paddingSymmetric(horizontal: 24),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 14, 24, 8),
+            child: Row(
+              children: [
+                Text(
+                  '我的设备',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: palette.text,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: VegaEntrance(
+              delayMs: 180,
+              child: Container(
+              margin: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+              padding: const EdgeInsets.fromLTRB(10, 4, 6, 0),
+              decoration: BoxDecoration(
+                color: palette.card,
+                borderRadius: BorderRadius.circular(palette.radius),
+                border: Border.all(color: palette.separator, width: 0.8),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: PeerTabPage(),
+            ),
+            ),
+          ),
+          if (!isOutgoingOnly) const Divider(height: 1),
+          if (!isOutgoingOnly) OnlineStatusWidget()
+        ],
+      ),
     );
   }
 
@@ -389,16 +437,16 @@ class _ConnectionPageState extends State<ConnectionPage>
   Widget _buildRemoteIDTextField(BuildContext context) {
     final palette = VegaColors.of(context);
     var w = Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 12, 14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 18, 18),
       decoration: BoxDecoration(
         color: palette.card,
         borderRadius: BorderRadius.circular(palette.radius),
         border: Border.all(color: palette.separator, width: 0.8),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
+            color: const Color(0xFF2B2378).withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -407,18 +455,30 @@ class _ConnectionPageState extends State<ConnectionPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 标题行
-            Text(
-              '连接伙伴',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: palette.text,
-              ),
-            ).marginOnly(bottom: 10),
             Row(
               children: [
-                Expanded(
-                    child: RawAutocomplete<Peer>(
+                Icon(Icons.desktop_windows_outlined,
+                    size: 15, color: palette.accent),
+                const SizedBox(width: 7),
+                Text(
+                  '远程控制别人',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: palette.text,
+                  ),
+                ),
+              ],
+            ),
+            const Spacer(),
+            Text(
+              '输入对方的设备 ID',
+              style: TextStyle(fontSize: 12, color: palette.secondary),
+            ).marginOnly(bottom: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                RawAutocomplete<Peer>(
                   optionsBuilder: (TextEditingValue textEditingValue) {
                     if (textEditingValue.text == '') {
                       _autocompleteOpts = const Iterable<Peer>.empty();
@@ -483,8 +543,10 @@ class _ConnectionPageState extends State<ConnectionPage>
                           focusNode: fieldFocusNode,
                           style: TextStyle(
                             fontFamily: 'WorkSans',
-                            fontSize: 16,
-                            height: 1.3,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1,
+                            height: 1.2,
                             color: palette.text,
                           ),
                           maxLines: 1,
@@ -495,13 +557,15 @@ class _ConnectionPageState extends State<ConnectionPage>
                             isDense: true,
                             counterText: '',
                             hintText:
-                                _idInputFocused.value ? '' : '输入伙伴 ID',
+                                _idInputFocused.value ? '' : '例如 123 456 789',
                             hintStyle: TextStyle(
-                              fontSize: 15,
-                              color: palette.secondary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w400,
+                              letterSpacing: 0,
+                              color: palette.secondary.withOpacity(0.7),
                             ),
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 12),
+                                horizontal: 14, vertical: 12),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(10),
                               borderSide: BorderSide(
@@ -595,10 +659,11 @@ class _ConnectionPageState extends State<ConnectionPage>
                               ))),
                     );
                   },
-                )),
-                const SizedBox(width: 8),
-                SizedBox(
-                  height: 40.0,
+                ),
+                const SizedBox(height: 12),
+                Row(children: [
+                Expanded(child: SizedBox(
+                  height: 42.0,
                   child: ElevatedButton(
                     onPressed: () {
                       onConnect();
@@ -618,11 +683,11 @@ class _ConnectionPageState extends State<ConnectionPage>
                           TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
                     ),
                   ),
-                ),
-                const SizedBox(width: 6),
+                )),
+                const SizedBox(width: 8),
                 Container(
-                  height: 40.0,
-                  width: 34.0,
+                  height: 42.0,
+                  width: 42.0,
                   decoration: BoxDecoration(
                     border: Border.all(color: palette.separator, width: 0.8),
                     borderRadius: BorderRadius.circular(10),
@@ -711,23 +776,14 @@ class _ConnectionPageState extends State<ConnectionPage>
                     ),
                   ),
                 ),
+                ]),
               ],
             ),
           ],
         ),
       ),
     );
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 600),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          w,
-          _buildRecentPeerChips(context),
-        ],
-      ),
-    );
+    return w;
   }
 
   /// 最近连接的前 6 个 peer ID，点击即连接。
