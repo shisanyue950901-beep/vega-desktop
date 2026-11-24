@@ -237,6 +237,8 @@ jobs:
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+          # Vega: 下载给用户的就是安装程序——文件名以 install.exe 结尾时双击直接进入安装页。
+          cp ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe ./SignOutput/Vega-Install.exe
 
       - name: UI 截图
         shell: pwsh
@@ -266,9 +268,9 @@ jobs:
           }
           "@
           # Vega: 先浅色、再深色各截一张
-          function Invoke-VegaShot([string]$name) {
-            Write-Host "Launching $exe"
-            $proc = Start-Process -FilePath $exe -PassThru
+          function Invoke-VegaShot([string]$name, [string[]]$exeArgs = @()) {
+            Write-Host "Launching $exe $exeArgs"
+            if ($exeArgs.Count -gt 0) { $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru } else { $proc = Start-Process -FilePath $exe -PassThru }
             $out = $null
             $ready = $false
             $deadline = (Get-Date).AddSeconds(60)
@@ -322,6 +324,13 @@ jobs:
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          try { Invoke-VegaShot "shot-install-dark.png" @("--install") } catch { Write-Host "install dark capture failed: $_" }
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'light'`n"
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          try { Invoke-VegaShot "shot-install.png" @("--install") } catch { Write-Host "install light capture failed: $_" }
 
       - name: Upload vega-screenshots
         continue-on-error: true
@@ -337,5 +346,6 @@ jobs:
           name: vega-windows-x64
           path: |
             ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+            ./SignOutput/Vega-Install.exe
             ./rustdesk/
           if-no-files-found: error
