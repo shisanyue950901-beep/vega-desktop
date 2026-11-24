@@ -5,20 +5,20 @@ class VegaColors {
   const VegaColors._();
 
   // ---- 浅色 ----
-  static const Color lightBg = Color(0xFFF2F2F7);
+  static const Color lightBg = Color(0xFFF4F3FA);
   static const Color lightCard = Color(0xFFFFFFFF);
   static const Color lightText = Color(0xFF1C1C1E);
-  static const Color lightSecondary = Color(0xFF8E8E93);
+  static const Color lightSecondary = Color(0xFF8A8799);
   static const Color lightAccent = Color(0xFF6C5CE7);
-  static const Color lightSeparator = Color(0xFFE5E5EA);
+  static const Color lightSeparator = Color(0xFFE6E4F0);
 
   // ---- 深色 ----
-  static const Color darkBg = Color(0xFF000000);
-  static const Color darkCard = Color(0xFF1C1C1E);
+  static const Color darkBg = Color(0xFF0C0B14);
+  static const Color darkCard = Color(0xFF17161F);
   static const Color darkText = Color(0xFFFFFFFF);
   static const Color darkSecondary = Color(0xFF8E8E93);
   static const Color darkAccent = Color(0xFF8E7CFF);
-  static const Color darkSeparator = Color(0xFF38383A);
+  static const Color darkSeparator = Color(0xFF2A2836);
 
   // ---- 通用 ----
   static const double radius = 18.0;
@@ -32,6 +32,14 @@ class VegaColors {
     end: Alignment.bottomRight,
     colors: [auroraStart, auroraMid, auroraEnd],
     stops: [0.0, 0.45, 1.0],
+  );
+
+  /// 深空主卡片：深紫夜空底色，白字对比度高，星点自然。
+  static const LinearGradient space = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFF1A1640), Color(0xFF2B2378), Color(0xFF5546D6)],
+    stops: [0.0, 0.55, 1.0],
   );
 
   /// 按当前主题亮度取一套配色（跟随 Theme.of(context)，而非系统亮度）。
@@ -79,21 +87,77 @@ class VegaStars extends StatelessWidget {
 
 class _VegaStarsPainter extends CustomPainter {
   static const _stars = <List<double>>[
-    [0.18, 0.22, 1.3],
-    [0.72, 0.14, 1.0],
-    [0.86, 0.62, 1.6],
-    [0.40, 0.78, 1.0],
-    [0.58, 0.36, 1.2],
-    [0.08, 0.66, 1.0],
-    [0.93, 0.30, 0.9],
+    [0.62, 0.10, 1.0],
+    [0.74, 0.22, 1.4],
+    [0.88, 0.12, 0.9],
+    [0.93, 0.40, 1.2],
+    [0.81, 0.55, 0.8],
+    [0.95, 0.70, 1.0],
+    [0.68, 0.34, 0.7],
+    [0.86, 0.84, 0.8],
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0xCCFFFFFF);
+    // 右上角一团极光辉光 + 左下角淡紫辉光
+    final glow = Paint()
+      ..shader = RadialGradient(colors: [
+        VegaColors.auroraEnd.withOpacity(0.42),
+        VegaColors.auroraEnd.withOpacity(0.0),
+      ]).createShader(Rect.fromCircle(
+          center: Offset(size.width * 0.95, -size.height * 0.05),
+          radius: size.height * 0.95));
+    canvas.drawRect(Offset.zero & size, glow);
+    final glow2 = Paint()
+      ..shader = RadialGradient(colors: [
+        VegaColors.auroraMid.withOpacity(0.32),
+        VegaColors.auroraMid.withOpacity(0.0),
+      ]).createShader(Rect.fromCircle(
+          center: Offset(size.width * 0.10, size.height * 1.15),
+          radius: size.height * 0.8));
+    canvas.drawRect(Offset.zero & size, glow2);
+    final paint = Paint()..color = const Color(0xB3FFFFFF);
     for (final s in _stars) {
       canvas.drawCircle(Offset(s[0] * size.width, s[1] * size.height), s[2], paint);
     }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Vega 标志：圆角方块里一颗四芒星（✦），极光渐变底。
+class VegaMark extends StatelessWidget {
+  const VegaMark({super.key, this.size = 28});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          gradient: VegaColors.aurora,
+          borderRadius: BorderRadius.circular(size * 0.3),
+        ),
+        child: CustomPaint(painter: _VegaMarkPainter()),
+      );
+}
+
+class _VegaMarkPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width * 0.32;
+    final k = r * 0.22;
+    final path = Path()
+      ..moveTo(c.dx, c.dy - r)
+      ..quadraticBezierTo(c.dx + k, c.dy - k, c.dx + r, c.dy)
+      ..quadraticBezierTo(c.dx + k, c.dy + k, c.dx, c.dy + r)
+      ..quadraticBezierTo(c.dx - k, c.dy + k, c.dx - r, c.dy)
+      ..quadraticBezierTo(c.dx - k, c.dy - k, c.dx, c.dy - r)
+      ..close();
+    canvas.drawPath(path, Paint()..color = Colors.white);
   }
 
   @override

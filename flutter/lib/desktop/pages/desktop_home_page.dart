@@ -63,6 +63,29 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget build(BuildContext context) {
     super.build(context);
     final isIncomingOnly = bind.isIncomingOnly();
+    // Vega 修改：主界面改为单屏——品牌栏、横幅、本设备 + 远程控制两张卡、设备列表。
+    // 仅「被控端」定制包仍沿用左侧窄栏。
+    if (!isIncomingOnly) {
+      final isOutgoingOnly = bind.isOutgoingOnly();
+      return _buildBlock(
+        child: ConnectionPage(
+          header: buildVegaHeader(context),
+          banner: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!isOutgoingOnly) buildPresetPasswordWarning(),
+              Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),
+            ],
+          ),
+          deviceCard: isOutgoingOnly
+              ? null
+              : ChangeNotifierProvider.value(
+                  value: gFFI.serverModel,
+                  child: buildDeviceCard(context),
+                ),
+        ),
+      );
+    }
     return _buildBlock(
         child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -188,7 +211,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
-  /// 「本设备」卡片：ID、临时密码（掩码/眼睛切换/刷新）与复制并分享。
+  /// Vega 修改：「本设备」深空主卡片——ID 与临时密码大字直接显示，点哪个复制哪个，
+  /// 底部一个白色主按钮「复制 ID 和密码」。
   Widget buildDeviceCard(BuildContext context) {
     final palette = VegaColors.of(context);
     return Consumer<ServerModel>(
@@ -202,17 +226,24 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             pwdText.isNotEmpty &&
             pwdText != '-' &&
             pwdText != translate('Generating ...');
-        // Vega 修改：沿用 Vega 0.6 品牌——极光渐变 + 星光点缀的主卡片，白色文字。
+        final idText = model.serverId.text;
+        final labelStyle = TextStyle(
+            fontSize: 12, color: Colors.white.withOpacity(0.62), height: 1.2);
+        const mono = ['Menlo', 'Consolas', 'Courier New'];
+        void copy(String text) {
+          Clipboard.setData(ClipboardData(text: text));
+          showToast(translate("Copied"));
+        }
+
         return Container(
-          margin: const EdgeInsets.only(left: 16, right: 12, top: 12),
           decoration: BoxDecoration(
-            gradient: VegaColors.aurora,
+            gradient: VegaColors.space,
             borderRadius: BorderRadius.circular(palette.radius),
             boxShadow: [
               BoxShadow(
-                color: VegaColors.auroraStart.withOpacity(0.35),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+                color: const Color(0xFF2B2378).withOpacity(0.28),
+                blurRadius: 28,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
@@ -221,202 +252,206 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             children: [
               const Positioned.fill(child: VegaStars()),
               Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 12, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 标题行
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '本设备',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
+                padding: const EdgeInsets.fromLTRB(20, 14, 12, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF5BE49B),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            '允许别人控制本机',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (!bind.isDisableSettings())
+                          buildCardIconButton(
+                            context: context,
+                            onHero: true,
+                            icon: Icons.tune_rounded,
+                            tooltip: translate('Change Password'),
+                            onTap: () => DesktopSettingPage.switch2page(
+                                SettingsTabKey.safety),
+                          ),
+                      ],
                     ),
-                  ),
-                  if (!bind.isDisableSettings())
-                    buildCardIconButton(
-                      context: context,
-                      onHero: true,
-                      icon: Icons.edit_outlined,
-                      tooltip: translate('Change Password'),
-                      onTap: () =>
-                          DesktopSettingPage.switch2page(SettingsTabKey.safety),
-                    ),
-                  buildPopupMenu(context, onHero: true),
-                ],
-              ),
-              const SizedBox(height: 6),
-              // ID
-              Text(
-                'ID',
-                style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.78)),
-              ),
-              // Vega 修改：InkWell 可 Tab 聚焦、Enter/Space 触发复制，键盘用户也能单独复制 ID。
-              InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: model.serverId.text));
-                  showToast(translate("Copied"));
-                },
-                child: Tooltip(
-                  message: translate('Copy'),
-                  child: IgnorePointer(
-                    child: TextFormField(
-                      controller: model.serverId,
-                      readOnly: true,
-                      enableInteractiveSelection: false,
-                      decoration: const InputDecoration(
-                        filled: false,
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 4),
-                      ),
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.8,
-                        fontFamily: 'monospace',
-                        fontFamilyFallback: const [
-                          'Menlo',
-                          'Consolas',
-                          'Courier New'
-                        ],
-                        color: Colors.white,
-                      ),
-                    ).workaroundFreezeLinuxMint(),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              // 临时密码
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '临时密码',
-                      style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.78)),
-                    ),
-                  ),
-                  buildCardIconButton(
-                    context: context,
-                    onHero: true,
-                    icon: _obscurePassword
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    tooltip: _obscurePassword
-                        ? translate('Show Password')
-                        : translate('Hide Password'),
-                    onTap: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                  ),
-                  if (showOneTime)
-                    AnimatedRotationWidget(
-                      onPressed: () => bind.mainUpdateTemporaryPassword(),
+                    const Spacer(),
+                    Text('设备 ID', style: labelStyle),
+                    const SizedBox(height: 2),
+                    // Vega 修改：InkWell 可 Tab 聚焦、Enter/Space 触发复制。
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => copy(idText),
                       child: Tooltip(
-                        message: translate('Refresh Password'),
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: RotatedBox(
-                            quarterTurns: 2,
-                            child: Icon(
-                              Icons.refresh,
-                              size: 20,
-                              color: Colors.white.withOpacity(0.78),
+                        message: translate('Copy'),
+                        child: Text(
+                          idText.isEmpty ? '— — —' : idText,
+                          maxLines: 1,
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                            height: 1.15,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(showOneTime ? '临时密码' : '密码',
+                                  style: labelStyle),
+                              const SizedBox(height: 2),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: pwdReady ? () => copy(pwdText) : null,
+                                child: Text(
+                                  !showOneTime
+                                      ? '已设置固定密码'
+                                      : (_obscurePassword
+                                          ? '••••••'
+                                          : (pwdText.isEmpty ? '—' : pwdText)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: showOneTime ? 20 : 14,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: showOneTime ? 2 : 0,
+                                    height: 1.3,
+                                    fontFamily:
+                                        showOneTime ? 'monospace' : null,
+                                    fontFamilyFallback:
+                                        showOneTime ? mono : null,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (showOneTime)
+                          buildCardIconButton(
+                            context: context,
+                            onHero: true,
+                            icon: _obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            tooltip: _obscurePassword
+                                ? translate('Show Password')
+                                : translate('Hide Password'),
+                            onTap: () => setState(
+                                () => _obscurePassword = !_obscurePassword),
+                          ),
+                        if (showOneTime)
+                          AnimatedRotationWidget(
+                            onPressed: () => bind.mainUpdateTemporaryPassword(),
+                            child: Tooltip(
+                              message: translate('Refresh Password'),
+                              child: Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: Icon(
+                                  Icons.refresh_rounded,
+                                  size: 19,
+                                  color: Colors.white.withOpacity(0.72),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => copy(pwdReady
+                              ? '设备 ID：$idText\n临时密码：$pwdText'
+                              : '设备 ID：$idText'),
+                          child: Container(
+                            height: 42,
+                            alignment: Alignment.center,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.ios_share_rounded,
+                                    size: 17, color: Color(0xFF4B3FD1)),
+                                const SizedBox(width: 6),
+                                Text(
+                                  pwdReady ? '复制 ID 和密码' : '复制 ID',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF4B3FD1),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ),
                     ),
-                ],
-              ),
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: pwdReady
-                    ? () {
-                        Clipboard.setData(ClipboardData(text: pwdText));
-                        showToast(translate("Copied"));
-                      }
-                    : null,
-                child: Tooltip(
-                  message: translate('Copy'),
-                  child: IgnorePointer(
-                    child: TextFormField(
-                      controller: model.serverPasswd,
-                      readOnly: true,
-                      enableInteractiveSelection: false,
-                      obscureText: _obscurePassword,
-                      obscuringCharacter: '•',
-                      decoration: const InputDecoration(
-                        filled: false,
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(vertical: 4),
-                      ),
-                      style: TextStyle(
-                        fontSize: 17,
-                        letterSpacing: 1.5,
-                        fontFamily: 'monospace',
-                        fontFamilyFallback: const [
-                          'Menlo',
-                          'Consolas',
-                          'Courier New'
-                        ],
-                        color: Colors.white,
-                      ),
-                    ).workaroundFreezeLinuxMint(),
-                  ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              // 复制并分享
-              Material(
-                color: Colors.white.withOpacity(0.22),
-                borderRadius: BorderRadius.circular(10),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () {
-                    final text = pwdReady
-                        ? 'ID: ${model.serverId.text} 密码: $pwdText'
-                        : 'ID: ${model.serverId.text}';
-                    Clipboard.setData(ClipboardData(text: text));
-                    showToast(translate("Copied"));
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 9),
-                    alignment: Alignment.center,
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.copy_all_outlined,
-                            size: 16, color: Colors.white),
-                        SizedBox(width: 6),
-                        Text(
-                          '复制并分享',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// Vega 修改：顶部品牌栏——✦ 标志 + Vega 字标 + 设置。
+  Widget buildVegaHeader(BuildContext context) {
+    final palette = VegaColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 12, 18, 12),
+      child: Row(
+        children: [
+          const VegaMark(size: 26),
+          const SizedBox(width: 10),
+          Text(
+            'Vega',
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+              color: palette.text,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '远程协助',
+            style: TextStyle(fontSize: 13, color: palette.secondary),
+          ),
+          const Spacer(),
+          buildPopupMenu(context),
+        ],
+      ),
     );
   }
 
@@ -470,8 +505,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     ? Theme.of(context).scaffoldBackgroundColor
                     : Theme.of(context).colorScheme.background),
             child: Icon(
-              Icons.more_vert_outlined,
-              size: 20,
+              Icons.settings_outlined,
+              size: 19,
               color: hover.value ? textColor : textColor?.withOpacity(0.5),
             ),
           ),
@@ -690,107 +725,91 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     }
 
-    // Vega 修改：安装提示改为 iOS 卡片（白底圆角 + 蓝色主按钮），替换上游粉色渐变块。
+    // Vega 修改：安装 / 提示改为一条横幅：图标 + 标题说明 + 右侧小按钮。
     final palette = VegaColors.of(context);
-    return Stack(
-      children: [
-        Container(
-          margin: EdgeInsets.fromLTRB(
-              16, marginTop, 16, bind.isIncomingOnly() ? marginTop : 12),
-          decoration: BoxDecoration(
-            color: palette.card,
-            borderRadius: BorderRadius.circular(palette.radius),
-            boxShadow: palette.isDark
-                ? null
-                : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
-                    )
-                  ],
+    final showClose = closeButton != null && closeButton == true;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 0, 24, 14),
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: palette.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: palette.separator, width: 0.8),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: palette.accent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(Icons.shield_outlined, size: 17, color: palette.accent),
           ),
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: [
-                  Icon(Icons.shield_outlined, size: 16, color: palette.accent),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      title.isNotEmpty ? translate(title) : vegaCardTitle(content),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: palette.text,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (content.isNotEmpty)
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 Text(
-                  vegaCardBody(content),
+                  title.isNotEmpty ? translate(title) : vegaCardTitle(content),
                   style: TextStyle(
-                    height: 1.45,
-                    fontSize: 12,
-                    color: palette.secondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: palette.text,
                   ),
-                ).marginOnly(top: 6),
-              if (btnText.isNotEmpty)
-                Material(
-                  color: palette.accent,
-                  borderRadius: BorderRadius.circular(10),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: onPressed,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      alignment: Alignment.center,
-                      child: Text(
-                        btnText == 'Install' ? '安装到本机' : translate(btnText),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
+                ),
+                if (content.isNotEmpty)
+                  Text(
+                    vegaCardBody(content),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.35,
+                      color: palette.secondary,
                     ),
-                  ),
-                ).marginOnly(top: 12),
-              // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
-              if (help != null && link != null && kUpstreamDocsUrl.isNotEmpty)
-                Center(
-                    child: InkWell(
-                        onTap: () async => await launchUrl(Uri.parse(link!)),
-                        child: Text(
-                          translate(help),
-                          style: TextStyle(
-                              decoration: TextDecoration.underline,
-                              color: palette.accent,
-                              fontSize: 12),
-                        )).marginOnly(top: 8)),
-            ],
-          ),
-        ),
-        if (closeButton != null && closeButton == true)
-          Positioned(
-            top: marginTop + 2,
-            right: 18,
-            child: IconButton(
-              icon: Icon(
-                Icons.close,
-                color: VegaColors.of(context).secondary,
-                size: 16,
-              ),
-              onPressed: closeCard,
+                  ).marginOnly(top: 2),
+              ],
             ),
           ),
-      ],
+          // 上游文档外链关闭（kUpstreamDocsUrl 为空）时不渲染「帮助」入口。
+          if (help != null && link != null && kUpstreamDocsUrl.isNotEmpty)
+            TextButton(
+              onPressed: () async => await launchUrl(Uri.parse(link!)),
+              child: Text(
+                translate(help),
+                style: TextStyle(fontSize: 12, color: palette.accent),
+              ),
+            ),
+          if (btnText.isNotEmpty)
+            ElevatedButton(
+              onPressed: onPressed,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: palette.accent,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: Text(
+                btnText == 'Install' ? '安装' : translate(btnText),
+                style:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ).marginOnly(left: 8),
+          if (showClose)
+            IconButton(
+              icon: Icon(Icons.close, color: palette.secondary, size: 16),
+              onPressed: closeCard,
+            ),
+        ],
+      ),
     );
   }
 
