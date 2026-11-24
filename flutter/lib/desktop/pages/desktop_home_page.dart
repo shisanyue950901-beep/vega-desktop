@@ -451,7 +451,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           borderRadius: BorderRadius.circular(8),
                           onTap: () => copy(idText),
                           child: Tooltip(
-                            message: translate('Copy'),
+                            message: '点击复制',
                             child: Text(
                               idText.isEmpty ? '— — —' : idText,
                               maxLines: 1,
@@ -784,7 +784,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       borderRadius: BorderRadius.circular(8),
                       onTap: () => copy(idText),
                       child: Tooltip(
-                        message: translate('Copy'),
+                        message: '点击复制',
                         child: Text(
                           idText.isEmpty ? '— — —' : idText,
                           maxLines: 1,

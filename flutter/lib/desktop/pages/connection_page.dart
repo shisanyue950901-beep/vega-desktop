@@ -347,7 +347,7 @@ class _ConnectionPageState extends State<ConnectionPage>
               VegaEntrance(
                 delayMs: 90,
                 child: SizedBox(
-                    height: 206, child: _buildRemoteIDTextField(context)),
+                    height: 176, child: _buildRemoteIDTextField(context)),
               ).paddingSymmetric(horizontal: 24),
             ],
           ),

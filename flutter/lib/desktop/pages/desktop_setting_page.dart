@@ -2850,6 +2850,41 @@ Widget _Card(
     {required String title,
     required List<Widget> children,
     List<Widget>? title_suffix}) {
+  // Vega 修改：嵌入主界面时用扁平分组卡片（小标题 + 细边框），占满宽度。
+  if (vegaSettingsEmbedded) {
+    return Builder(builder: (context) {
+      final palette = VegaColors.of(context);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            Expanded(
+              child: Text(translate(title),
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: palette.secondary)),
+            ),
+            ...?title_suffix,
+          ]).marginOnly(left: 4, top: 18, bottom: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(4, 8, 12, 10),
+            decoration: BoxDecoration(
+              color: palette.card,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: palette.separator, width: 0.8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children
+                  .map((e) => e.marginOnly(top: 2, bottom: 2))
+                  .toList(),
+            ),
+          ),
+        ],
+      ).marginSymmetric(horizontal: 24);
+    });
+  }
   return Row(
     children: [
       Flexible(
@@ -2928,6 +2963,36 @@ Widget _OptionCheckBox(
     enabled = false;
   }
 
+  if (vegaSettingsEmbedded) {
+    // Vega 修改：选项行 = 左侧文字 + 右侧开关。
+    final canChange = enabled && !isOptFixed;
+    return Obx(() => InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: canChange ? () => onChanged(!ref.value) : null,
+          child: SizedBox(
+            height: 38,
+            child: Row(children: [
+              Flexible(
+                child: Text(translate(label),
+                    style: TextStyle(
+                        fontSize: 14,
+                        color: disabledTextColor(context, enabled))),
+              ),
+              if (trailing != null) trailing,
+              const Spacer(),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: ref.value,
+                  activeColor: Colors.white,
+                  activeTrackColor: VegaColors.of(context).accent,
+                  onChanged: canChange ? onChanged : null,
+                ),
+              ),
+            ]).marginOnly(left: 12),
+          ),
+        ));
+  }
   return GestureDetector(
     child: Obx(
       () => Row(
@@ -2990,7 +3055,7 @@ Widget _Radio<T>(BuildContext context,
           child: Text(translate(label),
                   overflow: autoNewLine ? null : TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: _kContentFontSize,
+                      fontSize: vegaSettingsEmbedded ? 14 : _kContentFontSize,
                       color: disabledTextColor(context, onChange2 != null)))
               .marginOnly(left: 5),
         ),
