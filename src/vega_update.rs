@@ -62,6 +62,10 @@ const MAX_UPDATE_SIZE: u64 = 300 * 1024 * 1024;
 /// 防回退下限文件（独立文件，临时文件 + rename 原子替换）。
 const FLOOR_FILE: &str = "vega-update-floor";
 
+/// 待确认安装版本文件：`install` 交出安装包后写入，
+/// 下次启动由 [`pending_result`] 读取并删除。
+const PENDING_FILE: &str = "vega-update-pending";
+
 /// 保护下限文件的读-改-写，避免并发检查互相覆盖。
 static LAST_SEEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -186,22 +190,42 @@ fn read_floor() -> Option<(u32, u32, u32)> {
     parse_version(content.trim())
 }
 
-/// 写本地下限：同目录写 `vega-update-floor.tmp` 再 rename 覆盖，
+/// 原子写更新状态文件：同目录写 `tmp_name` 再 rename 覆盖，
 /// 任何一步失败都向上返回错误。
-fn write_floor(v: &str) -> ResultType<()> {
-    let path = Config::path(FLOOR_FILE);
+fn write_atomic(path: PathBuf, tmp_name: &str, v: &str, what: &str) -> ResultType<()> {
     let dir = match path.parent() {
         Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
-        _ => bail!("无法确定 Vega 更新下限目录"),
+        _ => bail!("无法确定 {}目录", what),
     };
     std::fs::create_dir_all(&dir)
-        .with_context(|| format!("创建 Vega 更新下限目录失败: {}", dir.display()))?;
-    let tmp = dir.join("vega-update-floor.tmp");
+        .with_context(|| format!("创建 {}目录失败: {}", what, dir.display()))?;
+    let tmp = dir.join(tmp_name);
     std::fs::write(&tmp, v.as_bytes())
-        .with_context(|| format!("写入 Vega 更新下限临时文件失败: {}", tmp.display()))?;
+        .with_context(|| format!("写入 {}临时文件失败: {}", what, tmp.display()))?;
     std::fs::rename(&tmp, &path)
-        .with_context(|| format!("替换 Vega 更新下限文件失败: {}", path.display()))?;
+        .with_context(|| format!("替换 {}文件失败: {}", what, path.display()))?;
     Ok(())
+}
+
+/// 写本地下限：同目录写 `vega-update-floor.tmp` 再 rename 覆盖。
+fn write_floor(v: &str) -> ResultType<()> {
+    write_atomic(
+        Config::path(FLOOR_FILE),
+        "vega-update-floor.tmp",
+        v,
+        "Vega 更新下限",
+    )
+}
+
+/// 写待确认安装版本：同目录写 `vega-update-pending.tmp` 再 rename 覆盖。
+#[cfg(windows)]
+fn write_pending(v: &str) -> ResultType<()> {
+    write_atomic(
+        Config::path(PENDING_FILE),
+        "vega-update-pending.tmp",
+        v,
+        "Vega 更新待确认",
+    )
 }
 
 /// 接受清单版本作为新的下限：读取、比较、写入在同一临界区完成。
@@ -219,6 +243,55 @@ fn accept_floor(m: &VegaManifest) -> ResultType<()> {
         }
         Some(floor) if remote == floor => Ok(()),
         _ => write_floor(&m.version),
+    }
+}
+
+/// 读取并清除上次安装的待确认结果。
+///
+/// `install` 的 `Ok` 只表示安装包已交给系统安装程序，安装程序会在新进程里
+/// 替换并重启 Vega，结果无法跨进程返回；因此交接后会把目标版本原子写入
+/// `vega-update-pending`，由下一次启动在这里判定：
+/// - 没有待确认文件返回 `None`；
+/// - 当前运行版本（与 `is_newer` 同用 `crate::VERSION`）不低于待确认版本，
+///   删除文件并返回 `Some(Ok(版本))`；
+/// - 否则删除文件并返回 `Some(Err(版本))`，表示更新未生效。
+pub fn pending_result() -> Option<Result<String, String>> {
+    let path = Config::path(PENDING_FILE);
+    let version = match std::fs::read_to_string(&path) {
+        Ok(content) => content.trim().to_string(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(err) => {
+            log::warn!(
+                "读取 Vega 更新待确认文件失败 {}: {}",
+                path.display(),
+                err
+            );
+            return None;
+        }
+    };
+    if let Err(err) = std::fs::remove_file(&path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            log::warn!(
+                "删除 Vega 更新待确认文件失败 {}: {}",
+                path.display(),
+                err
+            );
+        }
+    }
+    let applied = match (parse_version(&version), parse_version(crate::VERSION)) {
+        (Some(pending), Some(current)) => current >= pending,
+        _ => false,
+    };
+    if applied {
+        log::info!("Vega 更新已生效: {}", version);
+        Some(Ok(version))
+    } else {
+        log::warn!(
+            "Vega 更新未生效（待确认 {}，当前 {}）",
+            version,
+            crate::VERSION
+        );
+        Some(Err(version))
     }
 }
 
@@ -430,7 +503,12 @@ pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let dir = std::env::temp_dir().join("VegaUpdate");
+    // `.part` 与最终安装包同目录：目录从 final_installer_path 推导，
+    // 不再单独拼一次 temp_dir()。
+    let dir = match final_path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => bail!("无法确定 Vega 更新下载目录"),
+    };
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
@@ -559,9 +637,34 @@ fn download_to(m: &VegaManifest, part: &Path, mut file: std::fs::File) -> Result
 ///
 /// UAC 提权只弹一次；用户在 UAC 对话框点“取消”时返回 `Err`，
 /// 本函数不退出程序，调用方可以继续运行旧版本。
+///
+/// `Ok` 只表示安装包已交给系统安装程序，不代表安装成功：安装程序会在
+/// 新进程里替换并重启 Vega，结果无法跨进程返回。交接后会把 `m.version`
+/// 原子写入 `vega-update-pending`，重启后由 [`pending_result`] 判断更新
+/// 是否真的生效。
 #[cfg(windows)]
 pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
     verify_manifest(m).context("安装前重新校验 Vega 清单失败")?;
+    if !is_newer(&m.version) {
+        bail!(
+            "清单版本 {} 不高于当前运行版本 {}，拒绝安装",
+            m.version,
+            crate::VERSION
+        );
+    }
+    let remote = parse_version(&m.version)
+        .ok_or_else(|| anyhow!("清单版本无法解析，拒绝安装: {:?}", m.version))?;
+    if let Some(floor) = read_floor() {
+        if remote < floor {
+            bail!(
+                "清单版本回退（远端 {} 低于本地下限 {}.{}.{}），拒绝安装",
+                m.version,
+                floor.0,
+                floor.1,
+                floor.2
+            );
+        }
+    }
     let expected = final_installer_path(&m.version).context("计算 Vega 安装包最终路径失败")?;
     if path != expected {
         bail!(
@@ -580,5 +683,6 @@ pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
         )
     })?;
     log::info!("Vega 安装包已交给系统提权安装: {}", path.display());
+    write_pending(&m.version).context("记录 Vega 更新待确认版本失败")?;
     Ok(())
 }
