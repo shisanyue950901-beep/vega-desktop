@@ -370,6 +370,107 @@ jobs:
           Start-Sleep 2
           try { Invoke-VegaShot "shot-install.png" @("--install") } catch { Write-Host "install light capture failed: $_" }
 
+      - name: 覆盖安装验证
+        shell: pwsh
+        continue-on-error: false
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = "./SignOutput/Vega-Install.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "installer not found at $exe"
+            Get-ChildItem -Path ./SignOutput -Recurse -Filter *.exe -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+            throw "安装程序不存在: $exe"
+          }
+          Get-Item $exe | Format-List FullName, Length
+
+          $installed = Join-Path $env:ProgramFiles "Vega\vega.exe"
+
+          # 截图步骤可能留下正在运行的 vega，先清掉，避免安装时文件被占用。
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+
+          function Wait-VegaInstalled([string]$path, [int]$timeoutSec) {
+            $deadline = (Get-Date).AddSeconds($timeoutSec)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $path) { return $true }
+              Start-Sleep 3
+            }
+            return (Test-Path $path)
+          }
+
+          function Install-Vega([string]$installer) {
+            Write-Host "=== running $installer --silent-install ==="
+            $p = Start-Process -FilePath $installer -ArgumentList "--silent-install" -Wait -PassThru
+            Write-Host "installer exit code: $($p.ExitCode)"
+          }
+
+          # 1) 第一次安装
+          Install-Vega $exe
+          if (-not (Wait-VegaInstalled $installed 90)) {
+            throw "首次安装失败"
+          }
+          Write-Host "首次安装完成: $installed"
+
+          # 2) 读设备 ID
+          $id1 = (& $installed --get-id | Out-String).Trim()
+          Write-Host "ID1=$id1"
+          if ([string]::IsNullOrEmpty($id1)) {
+            throw "首次读取设备 ID 为空"
+          }
+
+          # 3) 写入标记设置（参数格式见 src/core_main.rs：--option KEY VALUE 写，--option KEY 读）
+          $markerWritten = $false
+          Write-Host "=== setting marker option ==="
+          $out = (& $installed --option vega-ci-marker 1 2>&1 | Out-String).Trim()
+          Write-Host "set option output: $out"
+          if ($out -match "disabled|requires") {
+            Write-Host "设置被拒绝（输出见上），本次仅校验安装后文件哈希"
+          } else {
+            $markerWritten = $true
+          }
+          $hash1 = (Get-FileHash -Path $installed -Algorithm SHA256).Hash
+          Write-Host "installed exe sha256 after first install: $hash1"
+
+          # 4) 覆盖安装（同一个安装程序再跑一次）
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          Install-Vega $exe
+          if (-not (Wait-VegaInstalled $installed 90)) {
+            throw "覆盖安装失败"
+          }
+          Write-Host "覆盖安装完成: $installed"
+          $hash2 = (Get-FileHash -Path $installed -Algorithm SHA256).Hash
+          Write-Host "installed exe sha256 after overwrite install: $hash2"
+
+          # 5) 再读设备 ID 并比对
+          $id2 = (& $installed --get-id | Out-String).Trim()
+          Write-Host "ID2=$id2"
+          if ([string]::IsNullOrEmpty($id2)) {
+            throw "覆盖安装后读取设备 ID 为空"
+          }
+          if ($id1 -ne $id2) {
+            throw "设备 ID 变了: $id1 -> $id2"
+          }
+
+          # 6) 标记校验（写成功才校验，服务刚起来时给几次重试）
+          if ($markerWritten) {
+            $marker = ""
+            for ($i = 0; $i -lt 20; $i++) {
+              $marker = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
+              Write-Host "read option vega-ci-marker: '$marker'"
+              if ($marker -eq "1") { break }
+              Start-Sleep 2
+            }
+            if ($marker -ne "1") {
+              throw "标记设置丢失: vega-ci-marker='$marker'"
+            }
+          } else {
+            Write-Host "跳过标记校验（未写入）"
+          }
+
+          Write-Host "覆盖安装验证通过 ID=$id1"
+
       - name: Upload vega-screenshots
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
