@@ -718,3 +718,145 @@ pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
     log::info!("Vega 安装包已交给系统提权安装: {}", path.display());
     Ok(())
 }
+
+/// 界面读取的更新状态；`phase` 取 idle/checking/latest/available/downloading/installing/error。
+struct UiState {
+    phase: &'static str,
+    version: String,
+    notes: String,
+    error: String,
+    manifest: Option<VegaManifest>,
+}
+
+/// 后台任务与界面共享的状态，锁中毒时继续使用内部值。
+static UI_STATE: Mutex<UiState> = Mutex::new(UiState {
+    phase: "idle",
+    version: String::new(),
+    notes: String::new(),
+    error: String::new(),
+    manifest: None,
+});
+
+fn ui_lock() -> std::sync::MutexGuard<'static, UiState> {
+    UI_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// 写入错误状态，消息最多保留 300 个字符。
+fn ui_fail(err: impl std::fmt::Display) {
+    let mut text = err.to_string();
+    if text.chars().count() > 300 {
+        text = text.chars().take(300).collect();
+    }
+    let mut state = ui_lock();
+    state.phase = "error";
+    state.error = text;
+}
+
+/// 启动后台检查；正在检查/下载/安装时不重复启动。
+pub fn ui_start_check() {
+    {
+        let mut state = ui_lock();
+        if matches!(state.phase, "checking" | "downloading" | "installing") {
+            return;
+        }
+        state.phase = "checking";
+        state.version.clear();
+        state.notes.clear();
+        state.error.clear();
+        state.manifest = None;
+    }
+    let _ = std::thread::spawn(move || match check() {
+        Ok(Some(m)) => {
+            let mut state = ui_lock();
+            state.phase = "available";
+            state.version = m.version.clone();
+            state.notes = m.notes.clone();
+            state.error.clear();
+            state.manifest = Some(m);
+        }
+        Ok(None) => {
+            let mut state = ui_lock();
+            state.phase = "latest";
+            state.version.clear();
+            state.notes.clear();
+            state.error.clear();
+            state.manifest = None;
+        }
+        Err(err) => ui_fail(err),
+    });
+}
+
+/// 从 available 状态后台下载并安装；非 Windows 直接报错。
+pub fn ui_start_install() {
+    #[cfg(not(windows))]
+    {
+        let mut state = ui_lock();
+        if state.phase == "available" && state.manifest.is_some() {
+            state.phase = "error";
+            state.error = "仅支持 Windows".to_string();
+        }
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        let m = {
+            let mut state = ui_lock();
+            if state.phase != "available" {
+                return;
+            }
+            let Some(m) = state.manifest.clone() else {
+                return;
+            };
+            state.phase = "downloading";
+            state.error.clear();
+            m
+        };
+        let _ = std::thread::spawn(move || match download(&m) {
+            Ok(path) => {
+                {
+                    let mut state = ui_lock();
+                    state.phase = "installing";
+                    state.error.clear();
+                }
+                if let Err(err) = install(&m, &path) {
+                    ui_fail(err);
+                }
+            }
+            Err(err) => ui_fail(err),
+        });
+    }
+}
+
+/// 界面轮询用状态 JSON，不暴露 manifest。
+pub fn ui_state_json() -> String {
+    let (phase, version, notes, error) = {
+        let state = ui_lock();
+        (
+            state.phase,
+            state.version.clone(),
+            state.notes.clone(),
+            state.error.clone(),
+        )
+    };
+    serde_json::json!({
+        "phase": phase,
+        "version": version,
+        "notes": notes,
+        "error": error,
+    })
+    .to_string()
+}
+
+/// 上次安装的待确认结果 JSON。
+pub fn ui_pending_json() -> String {
+    match pending_result() {
+        None => serde_json::json!({ "result": "none" }).to_string(),
+        Some(Ok(version)) => serde_json::json!({ "result": "ok", "version": version }).to_string(),
+        Some(Err(version)) => {
+            serde_json::json!({ "result": "failed", "version": version }).to_string()
+        }
+    }
+}
