@@ -394,6 +394,19 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
     }
 }
 
+/// 安装包的最终落盘路径：`%TEMP%/VegaUpdate/Vega-Setup-<version>.exe`。
+///
+/// `download` 用它决定 rename 目标，`install` 用它核对调用方给的路径，
+/// 两处共用同一个计算，保证装的就是刚下载的那一个文件。
+fn final_installer_path(version: &str) -> ResultType<PathBuf> {
+    if !valid_version(version) {
+        bail!("清单版本号无效，拒绝用于安装包文件名: {:?}", version);
+    }
+    Ok(std::env::temp_dir()
+        .join("VegaUpdate")
+        .join(format!("Vega-Setup-{}.exe", version)))
+}
+
 /// 下载安装包并校验，只落盘，不安装、不执行。
 ///
 /// 1. 再次 `verify_manifest`（签名、地址、大小、哈希格式都重查一遍）；
@@ -410,9 +423,7 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
 ///    不删文件。
 pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
     verify_manifest(m)?;
-    if !valid_version(&m.version) {
-        bail!("清单版本号无效，拒绝用于安装包文件名: {:?}", m.version);
-    }
+    let final_path = final_installer_path(&m.version)?;
 
     // 同版本并发下载互斥，直到 rename 完成才释放；锁中毒也继续用内部值。
     let _guard = DOWNLOAD_LOCK
@@ -420,7 +431,6 @@ pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let dir = std::env::temp_dir().join("VegaUpdate");
-    let final_path = dir.join(format!("Vega-Setup-{}.exe", m.version));
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
@@ -536,5 +546,39 @@ fn download_to(m: &VegaManifest, part: &Path, mut file: std::fs::File) -> Result
             m.url
         );
     }
+    Ok(())
+}
+
+/// 安装已下载并校验过的 Vega 安装包（仅 Windows）。
+///
+/// 只装已签名校验过的包：先重新 `verify_manifest`（签名、地址、大小、
+/// 哈希格式全部重查），再要求 `path` 与 [`download`] 的最终落盘路径
+/// 完全一致，然后把路径交给 `crate::platform::update_to_verified`——
+/// 它负责复制到受保护位置、重新核对 SHA-256 与大小、UAC 提权一次，
+/// 并以 `--update` 静默覆盖安装后重启。
+///
+/// UAC 提权只弹一次；用户在 UAC 对话框点“取消”时返回 `Err`，
+/// 本函数不退出程序，调用方可以继续运行旧版本。
+#[cfg(windows)]
+pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
+    verify_manifest(m).context("安装前重新校验 Vega 清单失败")?;
+    let expected = final_installer_path(&m.version).context("计算 Vega 安装包最终路径失败")?;
+    if path != expected {
+        bail!(
+            "安装包路径与下载路径不一致（期望 {}，实际 {}）",
+            expected.display(),
+            path.display()
+        );
+    }
+    let Some(path_str) = path.to_str() else {
+        bail!("安装包路径不是合法 UTF-8: {}", path.display());
+    };
+    crate::platform::update_to_verified(path_str, &m.sha256, m.size).with_context(|| {
+        format!(
+            "启动 Vega 安装包失败（UAC 被取消或安装未完成）: {}",
+            path.display()
+        )
+    })?;
+    log::info!("Vega 安装包已交给系统提权安装: {}", path.display());
     Ok(())
 }
