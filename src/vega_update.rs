@@ -270,7 +270,7 @@ fn accept_floor(m: &VegaManifest) -> ResultType<()> {
 /// 目标版本原子写入 `vega-update-pending` 再启动安装，交接失败会删掉它；
 /// 所以重启后这里看到的文件一定对应一次已启动的安装：
 /// - 没有待确认文件返回 `None`；
-/// - 当前运行版本（与 `is_newer` 同用 `crate::VERSION`）不低于待确认版本，
+/// - 当前运行版本（与 `is_newer` 同用 `crate::VEGA_VERSION`）不低于待确认版本，
 ///   删除文件并返回 `Some(Ok(版本))`；
 /// - 否则删除文件并返回 `Some(Err(版本))`，表示更新未生效。
 pub fn pending_result() -> Option<Result<String, String>> {
@@ -296,7 +296,7 @@ pub fn pending_result() -> Option<Result<String, String>> {
             );
         }
     }
-    let applied = match (parse_version(&version), parse_version(crate::VERSION)) {
+    let applied = match (parse_version(&version), parse_version(crate::VEGA_VERSION)) {
         (Some(pending), Some(current)) => current >= pending,
         _ => false,
     };
@@ -307,7 +307,7 @@ pub fn pending_result() -> Option<Result<String, String>> {
         log::warn!(
             "Vega 更新未生效（待确认 {}，当前 {}）",
             version,
-            crate::VERSION
+            crate::VEGA_VERSION
         );
         Some(Err(version))
     }
@@ -456,7 +456,7 @@ fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
 /// 远端版本是否比当前运行版本新：两段都按 (u32, u32, u32) 逐段比较，
 /// 任一侧解析失败返回 false。只在 `valid_version` 通过后调用。
 fn is_newer(remote: &str) -> bool {
-    match (parse_version(remote), parse_version(crate::VERSION)) {
+    match (parse_version(remote), parse_version(crate::VEGA_VERSION)) {
         (Some(remote), Some(current)) => remote > current,
         _ => false,
     }
@@ -472,13 +472,13 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
         log::info!(
             "Vega 发现新版本: {}（当前 {}）",
             manifest.version,
-            crate::VERSION
+            crate::VEGA_VERSION
         );
         Ok(Some(manifest))
     } else {
         log::info!(
             "Vega 已是最新版本: {}（远端 {}）",
-            crate::VERSION,
+            crate::VEGA_VERSION,
             manifest.version
         );
         Ok(None)
@@ -673,7 +673,7 @@ pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
         bail!(
             "清单版本 {} 不高于当前运行版本 {}，拒绝安装",
             m.version,
-            crate::VERSION
+            crate::VEGA_VERSION
         );
     }
     let remote = parse_version(&m.version)
