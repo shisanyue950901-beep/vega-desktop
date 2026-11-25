@@ -432,12 +432,14 @@ impl Handler {
         bail!("failed to get clipboard data from cm");
     }
 
-    // Vega 修改：整次读取（含最多一次重试）共用 1500ms 总截止时间；
+    // Vega 修改：整次读取（含最多一次重试）共用 3000ms 总截止时间；
+    // 首次尝试仍有完整额度：800ms 等回复 + 1000ms raw 读取（建连与首次发送也从该额度内扣），
+    // 重试只使用剩余时间，到点即失败。
     // 一次读取最多新建一个连接：第一次尝试内部已经新建过连接就不再重试，
     // 否则清空 stream 后用 allow_reconnect=false 再试一次，该次只允许新建一个连接。
     #[cfg(windows)]
     fn read_clipboard_from_cm_ipc(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(3000);
         let mut reconnected = false;
         match self.read_clipboard_from_cm_ipc_once(deadline, true, &mut reconnected) {
             Ok(contents) => Ok(contents),
