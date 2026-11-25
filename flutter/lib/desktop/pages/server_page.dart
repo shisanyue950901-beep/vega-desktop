@@ -22,6 +22,12 @@ import '../../models/file_model.dart';
 import '../../models/platform_model.dart';
 import '../../models/server_model.dart';
 import '../../vega_theme.dart';
+import '../widgets/vega_window_glass.dart';
+
+// Vega：毛玻璃开启时，窗口底色透明，卡片半透明。
+Color _vegaBg(Color solid) => VegaGlass.active ? Colors.transparent : solid;
+Color _vegaCard(VegaPalette p) =>
+    VegaGlass.active ? p.card.withOpacity(p.isDark ? 0.30 : 0.55) : p.card;
 
 /// Set only by this window's own close control, and only once the user has confirmed. Any other
 /// way the window can go - a session logout closing every window, the window manager, a native
@@ -54,6 +60,11 @@ class _DesktopServerPageState extends State<DesktopServerPage>
   void initState() {
     windowManager.addListener(this);
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final dark = Theme.of(context).brightness == Brightness.dark;
+      if (VegaGlass.apply(dark: dark)) setState(() {});
+    });
   }
 
   @override
@@ -95,7 +106,7 @@ class _DesktopServerPageState extends State<DesktopServerPage>
       child: Consumer<ServerModel>(
         builder: (context, serverModel, child) {
           final body = Scaffold(
-            backgroundColor: Theme.of(context).colorScheme.background,
+            backgroundColor: _vegaBg(Theme.of(context).colorScheme.background),
             body: ConnectionManager(),
           );
           return isLinux
@@ -271,7 +282,7 @@ class ConnectionManagerState extends State<ConnectionManager>
                                   ))),
                   ]);
                   return Container(
-                    color: Theme.of(context).scaffoldBackgroundColor,
+                    color: _vegaBg(Theme.of(context).scaffoldBackgroundColor),
                     child: row,
                   );
                 },
@@ -310,7 +321,7 @@ class ConnectionManagerState extends State<ConnectionManager>
                 windowManager.startDragging();
               },
               child: Container(
-                color: Theme.of(context).colorScheme.background,
+                color: _vegaBg(Theme.of(context).colorScheme.background),
               ),
             ),
           ),
@@ -490,7 +501,7 @@ class _CmHeaderState extends State<_CmHeader>
       margin: const EdgeInsets.fromLTRB(4, 8, 4, 6),
       padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
       decoration: BoxDecoration(
-        color: palette.card,
+        color: _vegaCard(palette),
         borderRadius: BorderRadius.circular(palette.radius),
         border: Border.all(color: palette.separator),
       ),
@@ -650,7 +661,7 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
           decoration: BoxDecoration(
             color: enabled
                 ? palette.accent.withOpacity(palette.isDark ? 0.18 : 0.10)
-                : palette.card,
+                : _vegaCard(palette),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
                 color: enabled
