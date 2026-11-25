@@ -332,6 +332,13 @@ jobs:
           $env:VEGA_SHOT_CM = "1"
           try { Invoke-VegaShot "shot-cm.png" } catch { Write-Host "cm capture failed: $_" }
           Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
+          foreach ($cc in @(@("1", "shot-cc.png"), @("2", "shot-cc-collapsed.png"))) {
+            Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep 2
+            $env:VEGA_SHOT_CC = $cc[0]
+            try { Invoke-VegaShot $cc[1] } catch { Write-Host "cc capture failed: $_" }
+          }
+          Remove-Item Env:VEGA_SHOT_CC -ErrorAction SilentlyContinue
           Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
@@ -341,6 +348,11 @@ jobs:
           $env:VEGA_SHOT_CM = "1"
           try { Invoke-VegaShot "shot-cm-dark.png" } catch { Write-Host "cm dark capture failed: $_" }
           Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_CC = "1"
+          try { Invoke-VegaShot "shot-cc-dark.png" } catch { Write-Host "cc dark capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_CC -ErrorAction SilentlyContinue
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           try { Invoke-VegaShot "shot-install-dark.png" @("--install") } catch { Write-Host "install dark capture failed: $_" }

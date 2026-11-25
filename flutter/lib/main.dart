@@ -10,6 +10,7 @@ import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_control_center.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
@@ -112,6 +113,21 @@ Future<void> main(List<String> args) async {
     windowManager.setPreventClose(true);
     if (isMacOS) {
       disableWindowMovable(kWindowId);
+    }
+    // Vega：CI 截图用，VEGA_SHOT_CC=1 展开 / 2 收起，预览远程窗口的控制中心。
+    final shotCc = Platform.environment['VEGA_SHOT_CC'];
+    if (shotCc == '1' || shotCc == '2') {
+      await initEnv(kAppTypeMain);
+      _runApp('', VegaControlCenterPreview(expanded: shotCc == '1'),
+          MyTheme.currentThemeMode());
+      windowManager.waitUntilReadyToShow(
+          getHiddenTitleBarWindowOptions(size: const Size(1000, 640)),
+          () async {
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.setOpacity(1);
+      });
+      return;
     }
     if (Platform.environment['VEGA_SHOT_CM'] == '1') {
       await _vegaShotCm();
