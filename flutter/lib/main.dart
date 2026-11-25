@@ -292,7 +292,15 @@ Future<void> _vegaShotCm() async {
   await initEnv(kAppTypeMain);
   desktopType = DesktopType.cm;
   _runApp('', const DesktopServerPage(), MyTheme.currentThemeMode());
-  await showCmWindow(isStartup: true);
+  // 不调 showCmWindow：它会 mainHideDock（工具窗口），CI 按主窗口句柄截图会找不到。
+  await windowManager.waitUntilReadyToShow(
+      getHiddenTitleBarWindowOptions(
+          size: kConnectionManagerWindowSizeClosedChat),
+      null);
+  await windowManager.show();
+  await windowManager.focus();
+  await windowManager.setOpacity(1);
+  await windowManager.setSize(kConnectionManagerWindowSizeClosedChat);
   setResizable(false);
   await Future.delayed(const Duration(milliseconds: 500));
   gFFI.serverModel.addConnection({
