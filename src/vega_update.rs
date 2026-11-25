@@ -9,7 +9,7 @@
 use hbb_common::{
     anyhow::{anyhow, bail, Context},
     base64::{engine::general_purpose::STANDARD, Engine as _},
-    config::LocalConfig,
+    config::Config,
     log,
     sodiumoxide::{
         self,
@@ -46,10 +46,10 @@ const UPDATE_URL_PREFIXES: [&str; 2] = [
 /// 安装包大小上限：300 MiB。下限为 1 字节。
 const MAX_UPDATE_SIZE: u64 = 300 * 1024 * 1024;
 
-/// 防回退记录键：本地已见过的最新清单版本。
-const LAST_SEEN_KEY: &str = "vega-update-last-seen";
+/// 防回退下限文件（独立文件，临时文件 + rename 原子替换）。
+const FLOOR_FILE: &str = "vega-update-floor";
 
-/// 保护 last-seen 的读-改-写，避免并发检查互相覆盖。
+/// 保护下限文件的读-改-写，避免并发检查互相覆盖。
 static LAST_SEEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,38 +167,50 @@ fn verify_manifest(m: &VegaManifest) -> ResultType<()> {
     Ok(())
 }
 
-/// 本地记录过的最高清单版本（空串表示尚未记录）。
-fn last_seen() -> String {
-    LocalConfig::get_option(LAST_SEEN_KEY)
+/// 读取本地下限：文件不存在、读取失败或内容无法解析都视为没有下限。
+fn read_floor() -> Option<(u32, u32, u32)> {
+    let content = std::fs::read_to_string(Config::path(FLOOR_FILE)).ok()?;
+    parse_version(content.trim())
 }
 
-/// 远端清单版本是否低于本地已见版本（即回退）。
-/// last_seen 无法解析时视为没有下限，返回 false。
-fn below_floor(m: &VegaManifest) -> bool {
-    let Some(remote) = parse_version(&m.version) else {
-        return false;
+/// 写本地下限：同目录写 `vega-update-floor.tmp` 再 rename 覆盖，
+/// 任何一步失败都向上返回错误。
+fn write_floor(v: &str) -> ResultType<()> {
+    let path = Config::path(FLOOR_FILE);
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir.to_path_buf(),
+        _ => bail!("无法确定 Vega 更新下限目录"),
     };
-    match parse_version(&last_seen()) {
-        Some(seen) => remote < seen,
-        None => false,
-    }
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("创建 Vega 更新下限目录失败: {}", dir.display()))?;
+    let tmp = dir.join("vega-update-floor.tmp");
+    std::fs::write(&tmp, v.as_bytes())
+        .with_context(|| format!("写入 Vega 更新下限临时文件失败: {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("替换 Vega 更新下限文件失败: {}", path.display()))?;
+    Ok(())
 }
 
-/// 记录已见版本，只升不降：仅当新版本高于当前记录（当前无法解析视为 None）
-/// 时写入。LocalConfig::set_option 不返回落盘错误，写入失败调用方无法感知，
-/// 属已知限制。
-fn bump_last_seen(v: &str) {
+/// 接受清单版本作为新的下限：读取、比较、写入在同一临界区完成。
+/// 低于本地下限直接拒绝，高于下限（或尚无下限）则落盘。
+fn accept_floor(m: &VegaManifest) -> ResultType<()> {
     let _guard = LAST_SEEN_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let current = last_seen();
-    if parse_version(v) > parse_version(&current) {
-        LocalConfig::set_option(LAST_SEEN_KEY.to_owned(), v.to_owned());
+    let Some(remote) = parse_version(&m.version) else {
+        bail!("清单版本无法解析: {:?}", m.version);
+    };
+    match read_floor() {
+        Some(floor) if remote < floor => {
+            bail!("清单版本回退（远端 {} 低于本地下限）", m.version)
+        }
+        Some(floor) if remote == floor => Ok(()),
+        _ => write_floor(&m.version),
     }
 }
 
 /// 先请求镜像（绕过系统代理），失败再请求 GitHub（走环境变量代理）。
-pub fn fetch_manifest() -> ResultType<VegaManifest> {
+fn fetch_manifest() -> ResultType<VegaManifest> {
     match fetch_mirror() {
         Ok(manifest) => return Ok(manifest),
         Err(err) => {
@@ -244,13 +256,7 @@ fn fetch_mirror() -> ResultType<VegaManifest> {
     if let Err(err) = verify_manifest(&manifest) {
         bail!("镜像清单校验失败，按镜像失败处理: {}", err);
     }
-    if below_floor(&manifest) {
-        bail!(
-            "镜像清单版本回退（远端 {} 低于本地已见 {}），按镜像失败处理",
-            manifest.version,
-            last_seen()
-        );
-    }
+    accept_floor(&manifest).context("镜像清单版本下限未通过，按镜像失败处理")?;
     Ok(manifest)
 }
 
@@ -287,14 +293,8 @@ fn fetch_fallback() -> ResultType<VegaManifest> {
     }
     verify_manifest(&manifest)
         .with_context(|| format!("GitHub 清单校验失败: {}", FALLBACK_URL))?;
-    if below_floor(&manifest) {
-        bail!(
-            "GitHub 清单版本回退（远端 {} 低于本地已见 {}）: {}",
-            manifest.version,
-            last_seen(),
-            FALLBACK_URL
-        );
-    }
+    accept_floor(&manifest)
+        .with_context(|| format!("GitHub 清单版本下限未通过: {}", FALLBACK_URL))?;
     Ok(manifest)
 }
 
@@ -353,7 +353,6 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
     if !valid_version(&manifest.version) {
         bail!("远端版本号无效: {:?}", manifest.version);
     }
-    bump_last_seen(&manifest.version);
     if is_newer(&manifest.version) {
         log::info!(
             "Vega 发现新版本: {}（当前 {}）",
