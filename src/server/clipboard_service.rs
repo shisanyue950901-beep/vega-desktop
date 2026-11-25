@@ -252,8 +252,9 @@ impl Handler {
     // because the auto-managed tokio runtime (async context) will be dropped after the call.
     // The next call will create a new runtime, which will cause the previous stream to be unusable.
     // So we need to manage the tokio runtime manually.
+    // Vega 修改：单次读取；超时或意外帧一律丢弃 stream 并返回 Err，避免迟到的旧回复被下一次读取误用。
     #[cfg(windows)]
-    fn read_clipboard_from_cm_ipc(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
+    fn read_clipboard_from_cm_ipc_once(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
         if self.rt.is_none() {
             self.rt = Some(Runtime::new()?);
         }
@@ -281,7 +282,15 @@ impl Handler {
 
         if let Some(stream) = &mut self.stream {
             loop {
-                match rt.block_on(stream.next_timeout(800))? {
+                // Vega 修改：next_timeout 出错时清掉 stream，不能让旧回复留在缓冲区。
+                let data = match rt.block_on(stream.next_timeout(800)) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        self.stream = None;
+                        bail!("failed to get clipboard data from cm: {}", e);
+                    }
+                };
+                match data {
                     Some(Data::ClipboardNonFile(Some((err, mut contents)))) => {
                         if !err.is_empty() {
                             bail!("{}", err);
@@ -308,9 +317,9 @@ impl Handler {
                                         bail!("failed to get raw clipboard data: {}", e);
                                     }
                                     Err(e) => {
-                                        // Reconnect to avoid the next raw data remaining in the buffer.
+                                        // Vega 修改：超时同样丢弃 stream 并报错，不再返回带空占位的内容。
                                         self.stream = None;
-                                        log::debug!("Failed to get raw clipboard data: {}", e);
+                                        bail!("failed to get raw clipboard data: {}", e);
                                     }
                                 }
                             }
@@ -321,6 +330,8 @@ impl Handler {
                         // ClipboardFile::MonitorReady is the first message sent by cm.
                     }
                     _ => {
+                        // Vega 修改：收到非 ClipboardNonFile 的意外帧，丢弃 stream 后报错。
+                        self.stream = None;
                         bail!("failed to get clipboard data from cm");
                     }
                 }
@@ -328,6 +339,19 @@ impl Handler {
         }
         // unreachable!
         bail!("failed to get clipboard data from cm");
+    }
+
+    // Vega 修改：失败时丢弃旧 stream 并重试一次，最多重试一次，防止迟到回复串到下一次读取。
+    #[cfg(windows)]
+    fn read_clipboard_from_cm_ipc(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
+        match self.read_clipboard_from_cm_ipc_once() {
+            Ok(contents) => Ok(contents),
+            Err(e) => {
+                log::debug!("Failed to read clipboard from cm: {}, retrying once", e);
+                self.stream = None;
+                self.read_clipboard_from_cm_ipc_once()
+            }
+        }
     }
 }
 
