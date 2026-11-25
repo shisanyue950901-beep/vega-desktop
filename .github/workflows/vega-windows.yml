@@ -376,6 +376,19 @@ jobs:
         timeout-minutes: 15
         run: |
           $ErrorActionPreference = "Stop"
+
+          # 服务名：安装脚本用 `sc create {app_name}` 注册服务，app_name 来自
+          # crate::get_app_name()，默认即 "Vega"。先按任务单 grep 源码确认，能在源码里
+          # 解析到字面量服务名时优先用字面量，否则沿用 "Vega"。
+          $svc = "Vega"
+          $svcHits = @(Select-String -Path "src/platform/windows.rs" -Pattern 'create_service|sc create|crate::get_app_name\(\)' -ErrorAction SilentlyContinue |
+            Select-Object -First 10)
+          $svcHits | ForEach-Object { Write-Host ("{0}:{1}: {2}" -f (Split-Path $_.Path -Leaf), $_.LineNumber, $_.Line.Trim()) }
+          foreach ($hit in $svcHits) {
+            if ($hit.Line -match 'sc create\s+([A-Za-z0-9_.\-]+)') { $svc = $Matches[1]; break }
+          }
+          Write-Host "服务名: $svc"
+
           $exe = "./SignOutput/Vega-Install.exe"
           if (-not (Test-Path $exe)) {
             Write-Host "installer not found at $exe"
@@ -386,125 +399,117 @@ jobs:
 
           $installed = Join-Path $env:ProgramFiles "Vega\vega.exe"
 
-          # 截图步骤可能留下正在运行的 vega，先清掉，避免安装时文件被占用。
-          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          # 截图阶段留下的 vega 进程只按命令行结束：带 --service（服务进程）或
+          # --server（已连接的服务端进程）的一律保留，避免影响安装和后续服务状态检查。
+          $leftover = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { -not ($_.CommandLine -and ($_.CommandLine -match '--service|--server')) })
+          foreach ($proc in $leftover) {
+            Write-Host "结束截图残留进程 PID=$($proc.ProcessId) CommandLine=$($proc.CommandLine)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          }
           Start-Sleep 2
 
-          function Wait-VegaInstalled([string]$path, [int]$timeoutSec) {
-            $deadline = (Get-Date).AddSeconds($timeoutSec)
+          # 启动安装并等到真正装完：安装器进程退出、没有带 --silent-install 的
+          # vega.exe 在跑、且服务已存在并处于 Running，三者同时满足才算完成。
+          function Run-Install([string]$installer) {
+            Write-Host "=== 运行 $installer --silent-install ==="
+            $p = Start-Process -FilePath $installer -ArgumentList "--silent-install" -PassThru
+            $deadline = (Get-Date).AddSeconds(180)
+            $installerExited = $false
+            $installProcs = @()
+            $svcRunning = $false
             while ((Get-Date) -lt $deadline) {
-              if (Test-Path $path) { return $true }
-              Start-Sleep 3
-            }
-            return (Test-Path $path)
-          }
-
-          function Install-Vega([string]$installer) {
-            Write-Host "=== running $installer --silent-install ==="
-            $p = Start-Process -FilePath $installer -ArgumentList "--silent-install" -Wait -PassThru
-            Write-Host "installer exit code: $($p.ExitCode)"
-          }
-
-          # 自解压安装包启动真正的安装进程后会先退出，-Wait 只等到自解压器结束；
-          # 覆盖安装时文件已存在，只能靠 LastWriteTimeUtc 变化判断替换完成。
-          function Wait-VegaReplaced([string]$path, $beforeUtc, [int]$timeoutSec) {
-            $deadline = (Get-Date).AddSeconds($timeoutSec)
-            while ((Get-Date) -lt $deadline) {
-              if ((Test-Path $path) -and ((Get-Item $path).LastWriteTimeUtc -ne $beforeUtc)) { return $true }
-              Start-Sleep 3
-            }
-            return ((Test-Path $path) -and ((Get-Item $path).LastWriteTimeUtc -ne $beforeUtc))
-          }
-
-          # 等真正的安装进程（vega.exe --silent-install / --install）全部退出再读 ID。
-          function Wait-NoInstallProcess([int]$timeoutSec) {
-            $deadline = (Get-Date).AddSeconds($timeoutSec)
-            while ($true) {
-              $procs = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
-                Where-Object { $_.CommandLine -and ($_.CommandLine -match '--silent-install' -or $_.CommandLine -match '--install') })
-              if ($procs.Count -eq 0) { return $true }
-              if ((Get-Date) -ge $deadline) {
-                Write-Host "等待安装进程结束超时，仍在运行: $($procs.CommandLine -join ' | ')"
-                return $false
+              try { $p.Refresh() } catch { }
+              $installerExited = $p.HasExited
+              $installProcs = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -and ($_.CommandLine -match '--silent-install') })
+              $svcObj = Get-Service -Name $svc -ErrorAction SilentlyContinue
+              $svcRunning = ($null -ne $svcObj) -and ($svcObj.Status -eq 'Running')
+              if ($installerExited -and $installProcs.Count -eq 0 -and $svcRunning) {
+                Write-Host "安装完成: installer exit=$($p.ExitCode)，服务 $svc 状态 Running"
+                return
               }
+              Write-Host ("等待安装: installerExited={0} --silent-install 进程={1} 服务Running={2}" -f $installerExited, $installProcs.Count, $svcRunning)
               Start-Sleep 3
             }
+            $reasons = @()
+            if (-not $installerExited) { $reasons += "安装程序 180 秒内没有退出" }
+            if ($installProcs.Count -gt 0) { $reasons += "仍有 --silent-install 的 vega.exe 在运行" }
+            if (-not $svcRunning) { $reasons += "服务 $svc 不存在或未处于 Running" }
+            throw ("安装超时(180s)未满足: " + ($reasons -join '; '))
           }
 
-          # 1) 第一次安装
-          Install-Vega $exe
-          if (-not (Wait-VegaInstalled $installed 90)) {
-            throw "首次安装失败"
-          }
-          if (-not (Wait-NoInstallProcess 60)) {
-            Write-Host "警告: 首次安装进程未在 60 秒内结束，继续读取 ID"
-          }
-          Write-Host "首次安装完成: $installed"
-
-          # 2) 读设备 ID
-          $id1 = (& $installed --get-id | Out-String).Trim()
-          Write-Host "ID1=$id1"
-          if ([string]::IsNullOrEmpty($id1)) {
-            throw "首次读取设备 ID 为空"
-          }
-
-          # 3) 写入标记设置（参数格式见 src/core_main.rs：--option KEY VALUE 写，--option KEY 读）
-          $markerWritten = $false
-          Write-Host "=== setting marker option ==="
-          $out = (& $installed --option vega-ci-marker 1 2>&1 | Out-String).Trim()
-          Write-Host "set option output: $out"
-          if ($out -match "disabled|requires") {
-            Write-Host "设置被拒绝（输出见上），本次仅校验安装后文件哈希"
-          } else {
-            $markerWritten = $true
-          }
-          $hash1 = (Get-FileHash -Path $installed -Algorithm SHA256).Hash
-          Write-Host "installed exe sha256 after first install: $hash1"
-
-          # 4) 覆盖安装（同一个安装程序再跑一次）
-          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
-          Start-Sleep 2
-          $t1 = (Get-Item $installed).LastWriteTimeUtc
-          Write-Host "覆盖安装前 LastWriteTimeUtc: $t1"
-          Install-Vega $exe
-          if (-not (Wait-VegaReplaced $installed $t1 120)) {
-            throw "覆盖安装没有替换文件"
-          }
-          Write-Host "覆盖安装已替换文件: $((Get-Item $installed).LastWriteTimeUtc)"
-          if (-not (Wait-NoInstallProcess 60)) {
-            Write-Host "警告: 覆盖安装进程未在 60 秒内结束，继续读取 ID"
-          }
-          Write-Host "覆盖安装完成: $installed"
-          $hash2 = (Get-FileHash -Path $installed -Algorithm SHA256).Hash
-          Write-Host "installed exe sha256 after overwrite install: $hash2"
-
-          # 5) 再读设备 ID 并比对
-          $id2 = (& $installed --get-id | Out-String).Trim()
-          Write-Host "ID2=$id2"
-          if ([string]::IsNullOrEmpty($id2)) {
-            throw "覆盖安装后读取设备 ID 为空"
-          }
-          if ($id1 -ne $id2) {
-            throw "设备 ID 变了: $id1 -> $id2"
-          }
-
-          # 6) 标记校验（写成功才校验，服务刚起来时给几次重试）
-          if ($markerWritten) {
-            $marker = ""
-            for ($i = 0; $i -lt 20; $i++) {
-              $marker = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
-              Write-Host "read option vega-ci-marker: '$marker'"
-              if ($marker -eq "1") { break }
+          # 服务刚启动时 --get-id 可能短暂拿不到值，最多重试 60 秒，取非空输出 Trim 后返回。
+          function Get-VegaId([string]$exePath) {
+            $deadline = (Get-Date).AddSeconds(60)
+            while ($true) {
+              $out = (& $exePath --get-id 2>$null | Out-String).Trim()
+              if (-not [string]::IsNullOrEmpty($out)) { return $out }
+              if ((Get-Date) -ge $deadline) { throw "60 秒内没有读到设备 ID" }
               Start-Sleep 2
             }
-            if ($marker -ne "1") {
-              throw "标记设置丢失: vega-ci-marker='$marker'"
-            }
-          } else {
-            Write-Host "跳过标记校验（未写入）"
           }
 
-          Write-Host "覆盖安装验证通过 ID=$id1"
+          try {
+            # 1) 首次安装
+            Run-Install $exe
+            Write-Host "首次安装完成: $installed"
+
+            # 2) 设置测试 ID，并确认服务侧读回的 ID 就是它
+            $testId = "vegaci" + (Get-Random -Minimum 100000 -Maximum 999999)
+            $setIdOut = (& $installed --set-id $testId 2>&1 | Out-String).Trim()
+            Write-Host "set-id output: $setIdOut"
+            $idDeadline = (Get-Date).AddSeconds(60)
+            try { $id = Get-VegaId $installed } catch { throw "设置测试 ID 失败: $_" }
+            while ($id -ne $testId) {
+              if ((Get-Date) -ge $idDeadline) { break }
+              Start-Sleep 2
+              try { $id = Get-VegaId $installed } catch { throw "设置测试 ID 失败: $_" }
+            }
+            Write-Host "设置后 ID=$id"
+            if ($id -ne $testId) { throw "设置测试 ID 失败" }
+
+            # 3) 写入标记选项并读回（src/core_main.rs：--option KEY VALUE 写，--option KEY 读）
+            $marker = [guid]::NewGuid().ToString("N")
+            $setMarkerOut = (& $installed --option vega-ci-marker $marker 2>&1 | Out-String).Trim()
+            Write-Host "set option output: $setMarkerOut"
+            $readBack = ""
+            for ($i = 0; $i -lt 15; $i++) {
+              $readBack = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
+              Write-Host "读取 vega-ci-marker: '$readBack'"
+              if ($readBack -eq $marker) { break }
+              Start-Sleep 2
+            }
+            if ($readBack -ne $marker) { throw "设置标记失败: vega-ci-marker='$readBack'" }
+
+            # 4) 覆盖安装（同一个安装程序再跑一次）
+            Run-Install $exe
+            Write-Host "覆盖安装完成: $installed"
+
+            # 5) 覆盖安装后设备 ID 与标记选项都必须保留
+            try { $id2 = Get-VegaId $installed } catch { throw "覆盖安装后设备 ID 变了: $_" }
+            Write-Host "覆盖安装后 ID=$id2"
+            if ($id2 -ne $testId) { throw "覆盖安装后设备 ID 变了" }
+            $readBack2 = ""
+            for ($i = 0; $i -lt 15; $i++) {
+              $readBack2 = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
+              Write-Host "覆盖安装后读取 vega-ci-marker: '$readBack2'"
+              if ($readBack2 -eq $marker) { break }
+              Start-Sleep 2
+            }
+            if ($readBack2 -ne $marker) { throw "覆盖安装后设置丢失" }
+
+            Write-Host "覆盖安装验证通过 ID=$testId"
+          } finally {
+            # runner 是一次性的，任务结束即销毁，这里不做卸载；只打印服务状态，便于排查失败。
+            Write-Host "=== 诊断: 服务 $svc 状态 ==="
+            $svcFinal = Get-Service -Name $svc -ErrorAction SilentlyContinue
+            if ($null -eq $svcFinal) {
+              Write-Host "服务 $svc 不存在"
+            } else {
+              $svcFinal | Format-List Name, Status, StartType, DisplayName | Out-String | Write-Host
+            }
+          }
 
       - name: Upload vega-screenshots
         continue-on-error: true
