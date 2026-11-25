@@ -25,9 +25,11 @@ import '../../vega_theme.dart';
 import '../widgets/vega_window_glass.dart';
 
 // Vega：毛玻璃开启时，窗口底色透明，卡片半透明。
-Color _vegaBg(Color solid) => VegaGlass.active ? Colors.transparent : solid;
+// 底色保留一层半透明色，系统没画出模糊时也看得清。
+Color _vegaBg(Color solid) =>
+    VegaGlass.active ? solid.withOpacity(0.45) : solid;
 Color _vegaCard(VegaPalette p) =>
-    VegaGlass.active ? p.card.withOpacity(p.isDark ? 0.30 : 0.55) : p.card;
+    VegaGlass.active ? p.card.withOpacity(p.isDark ? 0.55 : 0.70) : p.card;
 
 /// Set only by this window's own close control, and only once the user has confirmed. Any other
 /// way the window can go - a session logout closing every window, the window manager, a native
@@ -660,7 +662,9 @@ class _PrivilegeBoardState extends State<_PrivilegeBoard> {
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             color: enabled
-                ? palette.accent.withOpacity(palette.isDark ? 0.18 : 0.10)
+                ? Color.alphaBlend(
+                    palette.accent.withOpacity(palette.isDark ? 0.22 : 0.14),
+                    _vegaCard(palette))
                 : _vegaCard(palette),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
