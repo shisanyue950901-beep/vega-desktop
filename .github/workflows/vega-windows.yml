@@ -446,8 +446,8 @@ jobs:
           # 文件重新出现为准。
           $installDir = Join-Path $env:ProgramFiles "Vega"
           $cfgCandidates = @(
-            Join-Path $env:windir "ServiceProfiles\LocalService\AppData\Roaming\Vega\config",
-            Join-Path $env:windir "System32\config\systemprofile\AppData\Roaming\Vega\config"
+            (Join-Path $env:windir "ServiceProfiles\LocalService\AppData\Roaming\Vega\config"),
+            (Join-Path $env:windir "System32\config\systemprofile\AppData\Roaming\Vega\config")
           )
           $userCfgDir = Join-Path $env:APPDATA "Vega\config"
 
@@ -471,7 +471,11 @@ jobs:
             if ([string]::IsNullOrEmpty($text)) { return "" }
             # toml::to_string_pretty 写出来是 `id = "..."` / `id = '...'`，等号后
             # 允许空白；取第一个引号外的非空白 token 作为 ID。
-            $m = [regex]::Match($text, '^\s*id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            # Config::store() 把 ID 存为 enc_id（id 置空不写出），两者都认，优先 enc_id。
+            $m = [regex]::Match($text, '^\s*enc_id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            if (-not $m.Success) {
+              $m = [regex]::Match($text, '^\s*id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            }
             if (-not $m.Success) { return "" }
             return $m.Groups[1].Value.Trim()
           }
@@ -503,18 +507,25 @@ jobs:
             $cfgOpts = Join-Path $cfgDir "Vega2.toml"
             Write-Host "服务配置目录: $cfgDir"
 
+            # --server 在服务 Running 之后才加载配置并写出 enc_id，最多等 60 秒。
+            $idDeadline = (Get-Date).AddSeconds(60)
             $id1 = Get-ConfigId $cfgMain
+            while ([string]::IsNullOrEmpty($id1) -and (Get-Date) -lt $idDeadline) {
+              Start-Sleep 3
+              $id1 = Get-ConfigId $cfgMain
+            }
             if ([string]::IsNullOrEmpty($id1)) { throw "Vega.toml 里没有解析到设备 ID: $cfgMain" }
             Write-Host "首次安装 ID=$id1"
 
             # 3) 标记选项：写入后只认服务写盘的 Vega2.toml 含该标记，不读本地缓存
             $marker = [guid]::NewGuid().ToString("N")
-            $setMarkerOut = (& $installed --option vega-ci-marker $marker 2>&1 | Out-String).Trim()
-            Write-Host "set option output: $setMarkerOut"
-            $markerDeadline = (Get-Date).AddSeconds(30)
+            # IPC 可能尚未就绪：每 5 秒重发一次，最多 60 秒，直到服务写盘。
+            $markerDeadline = (Get-Date).AddSeconds(60)
             while (-not (Test-ConfigContains $cfgOpts $marker)) {
               if ((Get-Date) -ge $markerDeadline) { throw "标记未写入服务配置" }
-              Start-Sleep 2
+              $setMarkerOut = (& $installed --option vega-ci-marker $marker 2>&1 | Out-String).Trim()
+              Write-Host "set option output: $setMarkerOut"
+              Start-Sleep 5
             }
             Write-Host "标记已由服务写入: $cfgOpts"
 
