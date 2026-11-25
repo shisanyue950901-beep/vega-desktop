@@ -2520,6 +2520,11 @@ pub fn install_install_me(options: String, path: String) {
     install_me(options, path, false, false);
 }
 
+// Vega 修改：界面取走安装失败/UAC 取消标记，用于恢复安装按钮
+pub fn install_take_failed() -> SyncReturn<bool> {
+    SyncReturn(take_install_failed())
+}
+
 pub fn install_install_path() -> SyncReturn<String> {
     SyncReturn(install_path())
 }
