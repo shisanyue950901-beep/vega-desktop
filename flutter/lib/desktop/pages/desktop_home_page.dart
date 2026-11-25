@@ -152,7 +152,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         ),
       ),
       DesktopSettingPage(
-          initialTabkey: SettingsTabKey.general, vegaEmbedded: true),
+          // Vega：CI 截图用，VEGA_SHOT_ABOUT=1 时设置页直接打开「关于」。
+          initialTabkey: Platform.environment['VEGA_SHOT_ABOUT'] == '1'
+              ? SettingsTabKey.about
+              : SettingsTabKey.general,
+          vegaEmbedded: true),
     ];
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,

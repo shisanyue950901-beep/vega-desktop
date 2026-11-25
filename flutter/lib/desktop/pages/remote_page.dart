@@ -716,6 +716,25 @@ class _RemotePageState extends State<RemotePage>
       );
 
   Widget buildBody(BuildContext context) {
+    remoteToolbar(BuildContext context) => RemoteToolbar(
+          id: widget.id,
+          ffi: _ffi,
+          state: widget.toolbarState,
+          onEnterOrLeaveImageSetter: (id, func) {
+            _instanceIdOnEnterOrLeaveImage4Toolbar = id;
+            _onEnterOrLeaveImage4Toolbar = func;
+          },
+          onEnterOrLeaveImageCleaner: (id) {
+            // If _instanceIdOnEnterOrLeaveImage4Toolbar != id
+            // it means `_onEnterOrLeaveImage4Toolbar` is not set or it has been changed to another toolbar.
+            if (_instanceIdOnEnterOrLeaveImage4Toolbar == id) {
+              _instanceIdOnEnterOrLeaveImage4Toolbar = null;
+              _onEnterOrLeaveImage4Toolbar = null;
+            }
+          },
+          setRemoteState: setState,
+        );
+
     // Vega 修改：顶部显示控制中心；点「更多」切换出原版完整工具栏，
     // 此时控制中心移到右上角，再点「更多」收回。
     Widget vegaToolbar(BuildContext context) => Obx(() {
@@ -735,25 +754,6 @@ class _RemotePageState extends State<RemotePage>
             ),
           ]);
         });
-
-    remoteToolbar(BuildContext context) => RemoteToolbar(
-          id: widget.id,
-          ffi: _ffi,
-          state: widget.toolbarState,
-          onEnterOrLeaveImageSetter: (id, func) {
-            _instanceIdOnEnterOrLeaveImage4Toolbar = id;
-            _onEnterOrLeaveImage4Toolbar = func;
-          },
-          onEnterOrLeaveImageCleaner: (id) {
-            // If _instanceIdOnEnterOrLeaveImage4Toolbar != id
-            // it means `_onEnterOrLeaveImage4Toolbar` is not set or it has been changed to another toolbar.
-            if (_instanceIdOnEnterOrLeaveImage4Toolbar == id) {
-              _instanceIdOnEnterOrLeaveImage4Toolbar = null;
-              _onEnterOrLeaveImage4Toolbar = null;
-            }
-          },
-          setRemoteState: setState,
-        );
 
     bodyWidget() {
       return Stack(
