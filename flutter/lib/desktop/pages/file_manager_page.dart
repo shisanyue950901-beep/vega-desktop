@@ -167,18 +167,23 @@ class _FileManagerPageState extends State<FileManagerPage>
       OverlayEntry(builder: (_) {
         return willPopScope(Scaffold(
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          body: Row(
+          // Vega 修改：左本机、右远程两栏，传输进度放到底部。
+          body: Column(
             children: [
-              if (!isWeb)
-                Flexible(
-                    flex: 3,
-                    child: dropArea(FileManagerView(
-                        model.localController, _ffi, _mouseFocusScope))),
-              Flexible(
-                  flex: 3,
-                  child: dropArea(FileManagerView(
-                      model.remoteController, _ffi, _mouseFocusScope))),
-              Flexible(flex: 2, child: statusList())
+              Expanded(
+                child: Row(
+                  children: [
+                    if (!isWeb)
+                      Expanded(
+                          child: dropArea(FileManagerView(
+                              model.localController, _ffi, _mouseFocusScope))),
+                    Expanded(
+                        child: dropArea(FileManagerView(
+                            model.remoteController, _ffi, _mouseFocusScope))),
+                  ],
+                ),
+              ),
+              SizedBox(height: 170, child: statusList()),
             ],
           ),
         ));
