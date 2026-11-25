@@ -283,11 +283,7 @@ impl Handler {
             // If the previous stream is dead, `is_sent` will trigger reconnect.
             // Vega 修改：发送请求同样受总截止时间约束，超时视为发送失败。
             is_sent = match rt.block_on(async {
-                timeout(
-                    Duration::from_millis(send_remaining),
-                    stream.send(&Data::ClipboardNonFile(None)),
-                )
-                .await
+                timeout(send_remaining, stream.send(&Data::ClipboardNonFile(None))).await
             }) {
                 Ok(Ok(_)) => true,
                 Ok(Err(e)) => {
@@ -305,10 +301,50 @@ impl Handler {
                 self.stream = None;
                 bail!("failed to send clipboard request to cm");
             }
-            let mut stream = rt.block_on(crate::ipc::connect(100, "_cm"))?;
-            rt.block_on(stream.send(&Data::ClipboardNonFile(None)))?;
-            self.stream = Some(stream);
+            // Vega 修改：建连同样受总截止时间约束，剩余为 0 直接放弃。
+            let connect_remaining = cm_ipc_remaining_ms(deadline);
+            if connect_remaining == 0 {
+                self.stream = None;
+                bail!("timed out connecting to cm");
+            }
+            let connect_result =
+                rt.block_on(crate::ipc::connect(connect_remaining.min(100), "_cm"));
+            let mut stream = match connect_result {
+                Ok(stream) => stream,
+                Err(e) => {
+                    self.stream = None;
+                    return Err(e);
+                }
+            };
+            // Vega 修改：连接成功后立刻置位，保证一次读取最多新建一条连接（首次发送失败也不再重连）。
             *reconnected = true;
+            // Vega 修改：新连接的首次发送同样受总截止时间约束，超时视为失败。
+            let first_send_remaining = cm_ipc_remaining_ms(deadline);
+            if first_send_remaining == 0 {
+                self.stream = None;
+                bail!("timed out sending clipboard request to cm");
+            }
+            let sent = rt.block_on(async {
+                timeout(
+                    first_send_remaining,
+                    stream.send(&Data::ClipboardNonFile(None)),
+                )
+                .await
+            });
+            match sent {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    log::trace!("Failed to send to cm: {}", e);
+                    self.stream = None;
+                    bail!("failed to send clipboard request to cm");
+                }
+                Err(e) => {
+                    log::trace!("Failed to send to cm: {}", e);
+                    self.stream = None;
+                    bail!("timed out sending clipboard request to cm: {}", e);
+                }
+            }
+            self.stream = Some(stream);
         }
 
         // Vega 修改：每轮单独短借用 stream，超时/出错时可以安全清空 self.stream 再报错。
@@ -355,7 +391,7 @@ impl Handler {
                                     bail!("failed to get clipboard data from cm");
                                 };
                                 rt.block_on(async {
-                                    timeout(Duration::from_millis(raw_wait), stream.next_raw()).await
+                                    timeout(raw_wait, stream.next_raw()).await
                                 })
                             };
                             match raw {
