@@ -46,6 +46,11 @@ const CLIPBOARD_GET_MAX_RETRY: usize = 3;
 #[cfg(not(target_os = "android"))]
 const CLIPBOARD_GET_RETRY_INTERVAL_DUR: Duration = Duration::from_millis(33);
 
+// Vega 修改：控制端写入序号。每次控制端写入请求开始时自增，旧请求在重试前比对，
+// 若期间已有更新的控制端写入，旧请求放弃，避免旧内容覆盖新内容。
+#[cfg(target_os = "windows")]
+static VEGA_CLIENT_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[cfg(not(target_os = "android"))]
 fn valid_rgba_dimensions(width: i32, height: i32, data_len: usize) -> Option<(usize, usize)> {
     let width = usize::try_from(width).ok()?;
@@ -258,6 +263,13 @@ fn update_clipboard_(multi_clipboards: Vec<Clipboard>, side: ClipboardSide) {
 #[cfg(not(target_os = "android"))]
 fn do_update_clipboard_(mut to_update_data: Vec<ClipboardData>, side: ClipboardSide) {
     to_update_data = append_owner_marker(to_update_data, side);
+    // Vega 修改：仅 Windows 控制端路径取写入序号；第一次尝试不检查，保持原行为。
+    #[cfg(target_os = "windows")]
+    let my_write_seq = if side == ClipboardSide::Client {
+        Some(VEGA_CLIENT_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
+    } else {
+        None
+    };
     // Vega 修改：只有控制端（ClipboardSide::Client）写入本机剪贴板时才重试
     // ClipboardOccupied，被控端（Host）写入保持原行为。
     // 重试循环放在调用处而不是 ClipboardContext::set() 内，这样每次尝试都会重新获取
@@ -269,6 +281,20 @@ fn do_update_clipboard_(mut to_update_data: Vec<ClipboardData>, side: ClipboardS
     loop {
         let result = {
             let mut ctx = CLIPBOARD_CTX.lock().unwrap();
+            // Vega 修改：重试（第 2 次及以后）重新拿到锁后、写剪贴板前检查序号；
+            // 若已有更新的控制端写入请求，放弃本次旧写入（视为被取代），不再覆盖回旧内容。
+            #[cfg(target_os = "windows")]
+            {
+                let superseded = my_write_seq.is_some_and(|my| {
+                    VEGA_CLIENT_WRITE_SEQ.load(std::sync::atomic::Ordering::SeqCst) != my
+                });
+                if attempt > 1 && superseded {
+                    log::trace!(
+                        "Clipboard write superseded by a newer request, skip retry {attempt}/{CLIPBOARD_SET_MAX_RETRY}"
+                    );
+                    return;
+                }
+            }
             if ctx.is_none() {
                 match ClipboardContext::new() {
                     Ok(x) => {
