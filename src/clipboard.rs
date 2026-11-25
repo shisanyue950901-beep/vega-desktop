@@ -455,8 +455,32 @@ impl ClipboardContext {
 
     fn set(&mut self, data: &[ClipboardData]) -> ResultType<()> {
         let _lock = ARBOARD_MTX.lock().unwrap();
-        self.inner.set_formats(data)?;
-        Ok(())
+        #[cfg(target_os = "windows")]
+        {
+            // Vega 修改：Windows 上剪贴板被其他程序短暂占用时重试，避免这次同步直接丢失。
+            const CLIPBOARD_SET_MAX_RETRY: usize = 5;
+            let mut attempt = 1;
+            loop {
+                match self.inner.set_formats(data) {
+                    Ok(()) => return Ok(()),
+                    Err(arboard::Error::ClipboardOccupied)
+                        if attempt < CLIPBOARD_SET_MAX_RETRY =>
+                    {
+                        log::debug!(
+                            "Failed to set clipboard, clipboard is occupied, retrying... {attempt}/{CLIPBOARD_SET_MAX_RETRY}"
+                        );
+                        attempt += 1;
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.inner.set_formats(data)?;
+            Ok(())
+        }
     }
 
     #[cfg(target_os = "linux")]
