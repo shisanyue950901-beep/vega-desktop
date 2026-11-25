@@ -120,7 +120,8 @@ pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) 
     VEGA_INSTALL_FAILED.store(false, Ordering::SeqCst);
     #[cfg(windows)]
     std::thread::spawn(move || {
-        // Vega 修改：UAC 取消或安装失败时保留窗口，用户可再点安装
+        // Vega 修改：flutter 下 UAC 取消或安装失败时保留窗口，用户可再点安装；
+        // sciter 界面没有失败轮询，保持旧行为直接退出进程，避免卡在安装页
         if let Err(err) = crate::platform::windows::install_me(&_options, _path, _silent, _debug) {
             log::error!("Installation failed: {err:#}");
             // Vega 修改：通知界面恢复安装按钮
@@ -134,7 +135,11 @@ pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) 
             {
                 crate::platform::windows::message_box(&format!("Installation failed:\n{err:#}!"));
             }
+            // Vega 修改：sciter 界面不轮询失败标记，保持旧行为退出；flutter 界面返回后由轮询恢复
+            #[cfg(feature = "flutter")]
             return;
+            #[cfg(not(feature = "flutter"))]
+            std::process::exit(0);
         }
         std::process::exit(0);
     });
