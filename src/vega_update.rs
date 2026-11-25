@@ -49,9 +49,13 @@ const MAX_UPDATE_SIZE: u64 = 300 * 1024 * 1024;
 /// 防回退记录键：本地已见过的最新清单版本。
 const LAST_SEEN_KEY: &str = "vega-update-last-seen";
 
+/// 保护 last-seen 的读-改-写，避免并发检查互相覆盖。
+static LAST_SEEN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct VegaManifest {
     pub version: String,
+    /// 未签名，仅供显示，不可信。
     #[serde(default)]
     pub notes: String,
     #[serde(default)]
@@ -111,6 +115,16 @@ fn decode_signature(encoded: &str) -> ResultType<Signature> {
 
 /// 校验清单：Ed25519 detached 签名 + 字段约束。任一不满足返回 Err。
 fn verify_manifest(m: &VegaManifest) -> ResultType<()> {
+    for (name, value) in [
+        ("version", &m.version),
+        ("pub_date", &m.pub_date),
+        ("url", &m.url),
+        ("sha256", &m.sha256),
+    ] {
+        if value.bytes().any(|b| b.is_ascii_control()) {
+            bail!("清单 {} 含 ASCII 控制字符: {:?}", name, value);
+        }
+    }
     init_sodiumoxide()?;
     let signature = decode_signature(&m.signature)?;
     let pubkey = decode_pubkey()?;
@@ -126,8 +140,24 @@ fn verify_manifest(m: &VegaManifest) -> ResultType<()> {
     if m.size == 0 || m.size > MAX_UPDATE_SIZE {
         bail!("清单安装包大小越界: {} 字节", m.size);
     }
-    if !UPDATE_URL_PREFIXES.iter().any(|p| m.url.starts_with(*p)) {
+    let Some(prefix) = UPDATE_URL_PREFIXES.iter().find(|p| m.url.starts_with(**p)) else {
         bail!("清单下载地址不在允许的 Vega 发布地址内: {:?}", m.url);
+    };
+    if ["..", "%", "\\", "?", "#", "@"]
+        .iter()
+        .any(|p| m.url.contains(p))
+        || m.url.chars().any(char::is_whitespace)
+    {
+        bail!("清单下载地址含不允许的字符: {:?}", m.url);
+    }
+    let rest = &m.url[prefix.len()..];
+    if rest.starts_with('/')
+        || rest.contains("//")
+        || !rest
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'))
+    {
+        bail!("清单下载地址路径不合法: {:?}", m.url);
     }
 
     let message = signed_message(m);
@@ -142,8 +172,29 @@ fn last_seen() -> String {
     LocalConfig::get_option(LAST_SEEN_KEY)
 }
 
-fn set_last_seen(v: &str) {
-    LocalConfig::set_option(LAST_SEEN_KEY.to_owned(), v.to_owned());
+/// 远端清单版本是否低于本地已见版本（即回退）。
+/// last_seen 无法解析时视为没有下限，返回 false。
+fn below_floor(m: &VegaManifest) -> bool {
+    let Some(remote) = parse_version(&m.version) else {
+        return false;
+    };
+    match parse_version(&last_seen()) {
+        Some(seen) => remote < seen,
+        None => false,
+    }
+}
+
+/// 记录已见版本，只升不降：仅当新版本高于当前记录（当前无法解析视为 None）
+/// 时写入。LocalConfig::set_option 不返回落盘错误，写入失败调用方无法感知，
+/// 属已知限制。
+fn bump_last_seen(v: &str) {
+    let _guard = LAST_SEEN_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let current = last_seen();
+    if parse_version(v) > parse_version(&current) {
+        LocalConfig::set_option(LAST_SEEN_KEY.to_owned(), v.to_owned());
+    }
 }
 
 /// 先请求镜像（绕过系统代理），失败再请求 GitHub（走环境变量代理）。
@@ -193,6 +244,13 @@ fn fetch_mirror() -> ResultType<VegaManifest> {
     if let Err(err) = verify_manifest(&manifest) {
         bail!("镜像清单校验失败，按镜像失败处理: {}", err);
     }
+    if below_floor(&manifest) {
+        bail!(
+            "镜像清单版本回退（远端 {} 低于本地已见 {}），按镜像失败处理",
+            manifest.version,
+            last_seen()
+        );
+    }
     Ok(manifest)
 }
 
@@ -229,6 +287,14 @@ fn fetch_fallback() -> ResultType<VegaManifest> {
     }
     verify_manifest(&manifest)
         .with_context(|| format!("GitHub 清单校验失败: {}", FALLBACK_URL))?;
+    if below_floor(&manifest) {
+        bail!(
+            "GitHub 清单版本回退（远端 {} 低于本地已见 {}）: {}",
+            manifest.version,
+            last_seen(),
+            FALLBACK_URL
+        );
+    }
     Ok(manifest)
 }
 
@@ -287,22 +353,8 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
     if !valid_version(&manifest.version) {
         bail!("远端版本号无效: {:?}", manifest.version);
     }
-    let seen = last_seen();
-    match parse_version(&seen) {
-        Some(seen_version) if parse_version(&manifest.version) < Some(seen_version) => {
-            bail!(
-                "清单版本回退: 远端 {} 低于本地已见 {}",
-                manifest.version,
-                seen
-            );
-        }
-        None if !seen.is_empty() => {
-            log::warn!("Vega 忽略无法解析的本地已见版本记录: {:?}", seen);
-        }
-        _ => {}
-    }
+    bump_last_seen(&manifest.version);
     if is_newer(&manifest.version) {
-        set_last_seen(&manifest.version);
         log::info!(
             "Vega 发现新版本: {}（当前 {}）",
             manifest.version,
