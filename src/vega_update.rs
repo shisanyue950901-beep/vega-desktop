@@ -18,17 +18,25 @@ use hbb_common::{
     ResultType,
 };
 use serde_derive::Deserialize;
-use std::io::Read;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 /// 新一代 Vega 更新清单镜像（国内直连，走 HTTP）。
 pub const MIRROR_URL: &str = "http://60.205.95.98/vega/desktop/latest.json";
+/// 镜像源站前缀：命中它的下载地址走直连客户端，其余走 GitHub 客户端。
+const MIRROR_ORIGIN: &str = "http://60.205.95.98/";
 /// GitHub Releases 上的同一份清单，镜像失败时的兜底。
 pub const FALLBACK_URL: &str = "https://github.com/shisanyue950901-beep/vega-desktop/releases/download/vega-desktop-updates/latest.json";
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// 安装包下载请求级超时：600 秒，覆盖读完整个响应体。
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+/// 安装包流式读取缓冲区：64 KiB。
+const DOWNLOAD_BUF_BYTES: usize = 64 * 1024;
 /// 清单响应体上限：64 KiB。超过即视为异常响应。
 const MAX_BODY_BYTES: usize = 64 * 1024;
 /// GitHub 兜底最多跟随 5 次重定向。
@@ -224,19 +232,24 @@ fn fetch_manifest() -> ResultType<VegaManifest> {
     fetch_fallback()
 }
 
-/// 镜像客户端不复用仓库 hbbs_http 的现成客户端：自建客户端并
+/// 镜像客户端：不复用仓库 hbbs_http 的现成客户端，自建客户端并
 /// `.no_proxy()`，不读取系统代理，直连镜像；关闭 gzip/zstd 自动解压；
-/// 不跟随重定向；请求级 10s 超时（覆盖读完响应体）、5s 连接超时。
-/// 构建失败直接返回 Err，由 `fetch_manifest` 转去 GitHub 兜底。
-fn fetch_mirror() -> ResultType<VegaManifest> {
-    let client = reqwest::blocking::Client::builder()
+/// 不跟随重定向；5s 连接超时。清单检查和安装包下载共用。
+fn mirror_client() -> ResultType<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
         .no_proxy()
         .no_gzip()
         .no_zstd()
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .context("创建 Vega 镜像更新检查客户端失败")?;
+        .context("创建 Vega 镜像更新客户端失败")
+}
+
+/// 镜像清单检查：请求级 10s 超时（覆盖读完响应体）；构建客户端失败
+/// 直接返回 Err，由 `fetch_manifest` 转去 GitHub 兜底。
+fn fetch_mirror() -> ResultType<VegaManifest> {
+    let client = mirror_client()?;
     let response = client
         .get(MIRROR_URL)
         .timeout(HTTP_TIMEOUT)
@@ -260,21 +273,27 @@ fn fetch_mirror() -> ResultType<VegaManifest> {
     Ok(manifest)
 }
 
-/// GitHub 兜底：reqwest 读取 HTTPS_PROXY / HTTP_PROXY 等环境变量代理，
+/// GitHub 客户端：reqwest 读取 HTTPS_PROXY / HTTP_PROXY 等环境变量代理，
 /// 不读取 Windows 系统代理设置。重定向仅允许 https，最多 5 次，否则中止。
-fn fetch_fallback() -> ResultType<VegaManifest> {
-    let client = reqwest::blocking::Client::builder()
+/// 清单检查和安装包下载共用。
+fn github_client() -> ResultType<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if attempt.previous().len() > MAX_REDIRECTS {
-                attempt.error("GitHub 清单重定向次数超过 5 次")
+                attempt.error("GitHub 重定向次数超过 5 次")
             } else if attempt.url().scheme() != "https" {
-                attempt.error("GitHub 清单重定向目标不是 HTTPS")
+                attempt.error("GitHub 重定向目标不是 HTTPS")
             } else {
                 attempt.follow()
             }
         }))
         .build()
-        .context("创建 GitHub 更新检查客户端失败")?;
+        .context("创建 GitHub 更新客户端失败")
+}
+
+/// GitHub 兜底清单检查：请求级 10s 超时。
+fn fetch_fallback() -> ResultType<VegaManifest> {
+    let client = github_client()?;
     let response = client
         .get(FALLBACK_URL)
         .timeout(HTTP_TIMEOUT)
@@ -368,4 +387,125 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
         );
         Ok(None)
     }
+}
+
+/// 下载安装包并校验，只落盘，不安装、不执行。
+///
+/// 1. 再次 `verify_manifest`（签名、地址、大小、哈希格式都重查一遍）；
+/// 2. 目录 `%TEMP%/VegaUpdate`，先写 `Vega-Setup-<version>.exe.part`；
+/// 3. 镜像地址用直连客户端、GitHub 地址用仅 HTTPS 重定向客户端，
+///    请求级 600s 超时，状态码必须成功；
+/// 4. 64 KiB 缓冲区流式写盘并同步更新 SHA-256，累计字节超过清单大小
+///    立即中止；结束后字节数与哈希都必须与清单一致；
+/// 5. 全部通过才 `rename` 成最终文件名。任何失败都删除 `.part`。
+pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
+    verify_manifest(m)?;
+    if !valid_version(&m.version) {
+        bail!("清单版本号无效，拒绝用于安装包文件名: {:?}", m.version);
+    }
+
+    let dir = std::env::temp_dir().join("VegaUpdate");
+    let final_path = dir.join(format!("Vega-Setup-{}.exe", m.version));
+    let part_path = dir.join(format!("Vega-Setup-{}.exe.part", m.version));
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        remove_part(&part_path);
+        return Err(anyhow!(
+            "创建 Vega 更新下载目录失败 {}: {}",
+            dir.display(),
+            err
+        ));
+    }
+
+    if let Err(err) = download_to(m, &part_path) {
+        remove_part(&part_path);
+        return Err(err);
+    }
+    if let Err(err) = std::fs::rename(&part_path, &final_path) {
+        remove_part(&part_path);
+        return Err(anyhow!(
+            "替换安装包文件失败 {} -> {}: {}",
+            part_path.display(),
+            final_path.display(),
+            err
+        ));
+    }
+    log::info!(
+        "Vega 安装包已下载并校验: {}（{} 字节）",
+        final_path.display(),
+        m.size
+    );
+    Ok(final_path)
+}
+
+/// 删除 `.part` 临时文件；文件本就不存在不算失败。
+fn remove_part(part: &Path) {
+    if let Err(err) = std::fs::remove_file(part) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("删除 Vega 安装包临时文件失败 {}: {}", part.display(), err);
+        }
+    }
+}
+
+/// 下载并校验到 `part` 路径；失败清理和成功后 rename 由 `download` 负责。
+fn download_to(m: &VegaManifest, part: &Path) -> ResultType<()> {
+    let client = if m.url.starts_with(MIRROR_ORIGIN) {
+        mirror_client()?
+    } else {
+        github_client()?
+    };
+    let mut response = client
+        .get(m.url.as_str())
+        .timeout(DOWNLOAD_TIMEOUT)
+        .send()
+        .with_context(|| format!("请求安装包失败: {}", m.url))?;
+    if !response.status().is_success() {
+        bail!("下载安装包返回错误状态 {}: {}", response.status(), m.url);
+    }
+
+    let mut file = std::fs::File::create(part)
+        .with_context(|| format!("创建安装包临时文件失败: {}", part.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; DOWNLOAD_BUF_BYTES];
+    let mut total: u64 = 0;
+    loop {
+        let n = response
+            .read(&mut buf)
+            .with_context(|| format!("读取安装包数据失败: {}", m.url))?;
+        if n == 0 {
+            break;
+        }
+        total += n as u64;
+        if total > m.size {
+            bail!(
+                "安装包超过清单声明大小（>{} 字节），已中止: {}",
+                m.size,
+                m.url
+            );
+        }
+        file.write_all(&buf[..n])
+            .with_context(|| format!("写入安装包临时文件失败: {}", part.display()))?;
+        hasher.update(&buf[..n]);
+    }
+    file.flush()
+        .with_context(|| format!("刷新安装包临时文件失败: {}", part.display()))?;
+    drop(file);
+
+    if total != m.size {
+        bail!(
+            "安装包大小与清单不符（实际 {}，清单 {}）: {}",
+            total,
+            m.size,
+            m.url
+        );
+    }
+    let digest = hex::encode(hasher.finalize());
+    if digest != m.sha256 {
+        bail!(
+            "安装包 SHA-256 与清单不符（实际 {}，清单 {}）: {}",
+            digest,
+            m.sha256,
+            m.url
+        );
+    }
+    Ok(())
 }
