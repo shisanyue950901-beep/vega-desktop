@@ -253,8 +253,17 @@ impl Handler {
     // The next call will create a new runtime, which will cause the previous stream to be unusable.
     // So we need to manage the tokio runtime manually.
     // Vega 修改：单次读取；超时或意外帧一律丢弃 stream 并返回 Err，避免迟到的旧回复被下一次读取误用。
+    // `deadline` 是整次读取（含外层最多一次重试）共用的总截止时间；
+    // `allow_reconnect` 为 false 时，本函数不再「旧 stream 发送失败就换新连接」，
+    // 只能在外层已清空 stream 的前提下新建一个连接。
+    // `reconnected` 回传本次调用是否新建过连接，供外层判断还能不能重试。
     #[cfg(windows)]
-    fn read_clipboard_from_cm_ipc_once(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
+    fn read_clipboard_from_cm_ipc_once(
+        &mut self,
+        deadline: std::time::Instant,
+        allow_reconnect: bool,
+        reconnected: &mut bool,
+    ) -> ResultType<Vec<ClipboardNonFile>> {
         if self.rt.is_none() {
             self.rt = Some(Runtime::new()?);
         }
@@ -263,77 +272,123 @@ impl Handler {
             bail!("failed to get tokio runtime");
         };
         let mut is_sent = false;
+        // Vega 修改：到点直接放弃，不再尝试发送（放在借用 stream 之前清空，避免借用冲突）。
+        let send_remaining = cm_ipc_remaining_ms(deadline);
+        if send_remaining == 0 {
+            self.stream = None;
+            bail!("timed out sending clipboard request to cm");
+        }
         if let Some(stream) = &mut self.stream {
             // If previous stream is still alive, reuse it.
             // If the previous stream is dead, `is_sent` will trigger reconnect.
-            is_sent = match rt.block_on(stream.send(&Data::ClipboardNonFile(None))) {
-                Ok(_) => true,
+            // Vega 修改：发送请求同样受总截止时间约束，超时视为发送失败。
+            is_sent = match rt.block_on(async {
+                timeout(
+                    Duration::from_millis(send_remaining),
+                    stream.send(&Data::ClipboardNonFile(None)),
+                )
+                .await
+            }) {
+                Ok(Ok(_)) => true,
+                Ok(Err(e)) => {
+                    log::trace!("Failed to send to cm: {}", e);
+                    false
+                }
                 Err(e) => {
-                    log::debug!("Failed to send to cm: {}", e);
+                    log::trace!("Failed to send to cm: {}", e);
                     false
                 }
             };
         }
         if !is_sent {
+            if self.stream.is_some() && !allow_reconnect {
+                self.stream = None;
+                bail!("failed to send clipboard request to cm");
+            }
             let mut stream = rt.block_on(crate::ipc::connect(100, "_cm"))?;
             rt.block_on(stream.send(&Data::ClipboardNonFile(None)))?;
             self.stream = Some(stream);
+            *reconnected = true;
         }
 
-        if let Some(stream) = &mut self.stream {
-            loop {
-                // Vega 修改：next_timeout 出错时清掉 stream，不能让旧回复留在缓冲区。
-                let data = match rt.block_on(stream.next_timeout(800)) {
-                    Ok(data) => data,
-                    Err(e) => {
-                        self.stream = None;
-                        bail!("failed to get clipboard data from cm: {}", e);
-                    }
+        // Vega 修改：每轮单独短借用 stream，超时/出错时可以安全清空 self.stream 再报错。
+        loop {
+            // Vega 修改：每轮都按总截止时间算剩余时间，剩余为 0 就放弃并丢弃 stream。
+            let remaining = cm_ipc_remaining_ms(deadline);
+            if remaining == 0 {
+                self.stream = None;
+                bail!("timed out getting clipboard data from cm");
+            }
+            let next = {
+                let Some(stream) = self.stream.as_mut() else {
+                    bail!("failed to get clipboard data from cm");
                 };
-                match data {
-                    Some(Data::ClipboardNonFile(Some((err, mut contents)))) => {
-                        if !err.is_empty() {
-                            bail!("{}", err);
-                        } else {
-                            if contents.iter().any(|c| c.next_raw) {
-                                // Wrap the future with a `Timeout` in an async block to avoid panic.
-                                // We cannot use `rt.block_on(timeout(1000, stream.next_raw()))` here, because it causes panic:
-                                // thread '<unnamed>' panicked at D:\Projects\rust\rustdesk\libs\hbb_common\src\lib.rs:98:5:
-                                // there is no reactor running, must be called from the context of a Tokio 1.x runtime
-                                // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-                                match rt.block_on(async { timeout(1000, stream.next_raw()).await })
-                                {
-                                    Ok(Ok(mut data)) => {
-                                        for c in &mut contents {
-                                            if c.next_raw {
-                                                // No need to check the length because sum(content_len) == data.len().
-                                                c.content = data.split_to(c.content_len).into();
-                                            }
+                rt.block_on(stream.next_timeout(remaining.min(800)))
+            };
+            // Vega 修改：next_timeout 出错时清掉 stream，不能让旧回复留在缓冲区。
+            let data = match next {
+                Ok(data) => data,
+                Err(e) => {
+                    self.stream = None;
+                    bail!("failed to get clipboard data from cm: {}", e);
+                }
+            };
+            match data {
+                Some(Data::ClipboardNonFile(Some((err, mut contents)))) => {
+                    if !err.is_empty() {
+                        bail!("{}", err);
+                    } else {
+                        if contents.iter().any(|c| c.next_raw) {
+                            // Wrap the future with a `Timeout` in an async block to avoid panic.
+                            // We cannot use `rt.block_on(timeout(1000, stream.next_raw()))` here, because it causes panic:
+                            // thread '<unnamed>' panicked at D:\Projects\rust\rustdesk\libs\hbb_common\src\lib.rs:98:5:
+                            // there is no reactor running, must be called from the context of a Tokio 1.x runtime
+                            // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+                            // Vega 修改：raw 数据的等待同样不能超过总截止时间。
+                            let raw_wait = cm_ipc_remaining_ms(deadline).min(1000);
+                            if raw_wait == 0 {
+                                self.stream = None;
+                                bail!("timed out getting raw clipboard data from cm");
+                            }
+                            let raw = {
+                                let Some(stream) = self.stream.as_mut() else {
+                                    bail!("failed to get clipboard data from cm");
+                                };
+                                rt.block_on(async {
+                                    timeout(Duration::from_millis(raw_wait), stream.next_raw()).await
+                                })
+                            };
+                            match raw {
+                                Ok(Ok(mut data)) => {
+                                    for c in &mut contents {
+                                        if c.next_raw {
+                                            // No need to check the length because sum(content_len) == data.len().
+                                            c.content = data.split_to(c.content_len).into();
                                         }
                                     }
-                                    Ok(Err(e)) => {
-                                        // reset by peer
-                                        self.stream = None;
-                                        bail!("failed to get raw clipboard data: {}", e);
-                                    }
-                                    Err(e) => {
-                                        // Vega 修改：超时同样丢弃 stream 并报错，不再返回带空占位的内容。
-                                        self.stream = None;
-                                        bail!("failed to get raw clipboard data: {}", e);
-                                    }
+                                }
+                                Ok(Err(e)) => {
+                                    // reset by peer
+                                    self.stream = None;
+                                    bail!("failed to get raw clipboard data: {}", e);
+                                }
+                                Err(e) => {
+                                    // Vega 修改：超时同样丢弃 stream 并报错，不再返回带空占位的内容。
+                                    self.stream = None;
+                                    bail!("failed to get raw clipboard data: {}", e);
                                 }
                             }
-                            return Ok(contents);
                         }
+                        return Ok(contents);
                     }
-                    Some(Data::ClipboardFile(ClipboardFile::MonitorReady)) => {
-                        // ClipboardFile::MonitorReady is the first message sent by cm.
-                    }
-                    _ => {
-                        // Vega 修改：收到非 ClipboardNonFile 的意外帧，丢弃 stream 后报错。
-                        self.stream = None;
-                        bail!("failed to get clipboard data from cm");
-                    }
+                }
+                Some(Data::ClipboardFile(ClipboardFile::MonitorReady)) => {
+                    // ClipboardFile::MonitorReady is the first message sent by cm.
+                }
+                _ => {
+                    // Vega 修改：收到非 ClipboardNonFile 的意外帧，丢弃 stream 后报错。
+                    self.stream = None;
+                    bail!("failed to get clipboard data from cm");
                 }
             }
         }
@@ -341,18 +396,39 @@ impl Handler {
         bail!("failed to get clipboard data from cm");
     }
 
-    // Vega 修改：失败时丢弃旧 stream 并重试一次，最多重试一次，防止迟到回复串到下一次读取。
+    // Vega 修改：整次读取（含最多一次重试）共用 1500ms 总截止时间；
+    // 一次读取最多新建一个连接：第一次尝试内部已经新建过连接就不再重试，
+    // 否则清空 stream 后用 allow_reconnect=false 再试一次，该次只允许新建一个连接。
     #[cfg(windows)]
     fn read_clipboard_from_cm_ipc(&mut self) -> ResultType<Vec<ClipboardNonFile>> {
-        match self.read_clipboard_from_cm_ipc_once() {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        let mut reconnected = false;
+        match self.read_clipboard_from_cm_ipc_once(deadline, true, &mut reconnected) {
             Ok(contents) => Ok(contents),
             Err(e) => {
-                log::debug!("Failed to read clipboard from cm: {}, retrying once", e);
+                // 第一次尝试内已经新建过连接，再试就可能新建第二个连接，直接失败。
+                if reconnected {
+                    log::trace!(
+                        "Failed to read clipboard from cm: {}, already reconnected, giving up",
+                        e
+                    );
+                    return Err(e);
+                }
+                log::trace!("Failed to read clipboard from cm: {}, retrying once", e);
                 self.stream = None;
-                self.read_clipboard_from_cm_ipc_once()
+                self.read_clipboard_from_cm_ipc_once(deadline, false, &mut reconnected)
             }
         }
     }
+}
+
+// Vega 修改：总截止时间还剩多少毫秒，已经到点返回 0。
+#[cfg(windows)]
+fn cm_ipc_remaining_ms(deadline: std::time::Instant) -> u64 {
+    deadline
+        .checked_duration_since(std::time::Instant::now())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[cfg(target_os = "android")]
