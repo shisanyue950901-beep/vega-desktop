@@ -2496,6 +2496,10 @@ pub fn main_vega_update_pending() -> SyncReturn<String> {
     }
 }
 
+pub fn main_vega_version() -> SyncReturn<String> {
+    SyncReturn(crate::VEGA_VERSION.to_owned())
+}
+
 pub fn set_cur_session_id(session_id: SessionID) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         set_cur_session_id_(session_id, &session.get_keyboard_mode())
