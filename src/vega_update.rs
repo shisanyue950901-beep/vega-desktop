@@ -21,8 +21,8 @@ use serde_derive::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// 新一代 Vega 更新清单镜像（国内直连，走 HTTP）。
 pub const MIRROR_URL: &str = "http://60.205.95.98/vega/desktop/latest.json";
@@ -37,6 +37,11 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// 安装包流式读取缓冲区：64 KiB。
 const DOWNLOAD_BUF_BYTES: usize = 64 * 1024;
+/// 同版本并发下载互斥：从建目录到 rename 全程持锁。
+///
+/// 临时文件名本身带 pid + 纳秒后缀，锁只负责同一进程内的并发调用
+/// 不互相覆盖最终文件；跨进程由 `create_new` 的唯一文件名保证。
+static DOWNLOAD_LOCK: Mutex<()> = Mutex::new(());
 /// 清单响应体上限：64 KiB。超过即视为异常响应。
 const MAX_BODY_BYTES: usize = 64 * 1024;
 /// GitHub 兜底最多跟随 5 次重定向。
@@ -392,33 +397,64 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
 /// 下载安装包并校验，只落盘，不安装、不执行。
 ///
 /// 1. 再次 `verify_manifest`（签名、地址、大小、哈希格式都重查一遍）；
-/// 2. 目录 `%TEMP%/VegaUpdate`，先写 `Vega-Setup-<version>.exe.part`；
+/// 2. 取 `DOWNLOAD_LOCK` 后建目录 `%TEMP%/VegaUpdate`，用 `create_new`
+///    创建带 pid + 纳秒后缀的
+///    `Vega-Setup-<version>.<pid>-<nanos>.part`，同名文件已存在即失败；
 /// 3. 镜像地址用直连客户端、GitHub 地址用仅 HTTPS 重定向客户端，
 ///    请求级 600s 超时，状态码必须成功；
 /// 4. 64 KiB 缓冲区流式写盘并同步更新 SHA-256，累计字节超过清单大小
 ///    立即中止；结束后字节数与哈希都必须与清单一致；
-/// 5. 全部通过才 `rename` 成最终文件名。任何失败都删除 `.part`。
+/// 5. 全部通过才 `rename` 成最终文件名（已存在先删除）。只有本次调用
+///    成功 `create_new` 的 `.part` 才会被清理，建目录前的错误不删文件。
 pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
     verify_manifest(m)?;
     if !valid_version(&m.version) {
         bail!("清单版本号无效，拒绝用于安装包文件名: {:?}", m.version);
     }
 
+    // 同版本并发下载互斥，直到 rename 完成才释放；锁中毒也继续用内部值。
+    let _guard = DOWNLOAD_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     let dir = std::env::temp_dir().join("VegaUpdate");
     let final_path = dir.join(format!("Vega-Setup-{}.exe", m.version));
-    let part_path = dir.join(format!("Vega-Setup-{}.exe.part", m.version));
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        remove_part(&part_path);
-        return Err(anyhow!(
-            "创建 Vega 更新下载目录失败 {}: {}",
-            dir.display(),
-            err
-        ));
-    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let part_path = dir.join(format!(
+        "Vega-Setup-{}.{}-{}.part",
+        m.version,
+        std::process::id(),
+        nanos
+    ));
 
-    if let Err(err) = download_to(m, &part_path) {
+    // 建目录失败时本次还没有创建 `.part`，不删除任何文件。
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("创建 Vega 更新下载目录失败 {}", dir.display()))?;
+
+    // `create_new`：同名临时文件已存在（并发或残留）直接失败，绝不覆盖。
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&part_path)
+        .with_context(|| format!("创建安装包临时文件失败: {}", part_path.display()))?;
+
+    // 从这里开始 `.part` 属于本次调用，后续失败才允许删除。
+    if let Err(err) = download_to(m, &part_path, file) {
         remove_part(&part_path);
         return Err(err);
+    }
+    if final_path.exists() {
+        if let Err(err) = std::fs::remove_file(&final_path) {
+            remove_part(&part_path);
+            return Err(anyhow!(
+                "删除旧安装包文件失败 {}: {}",
+                final_path.display(),
+                err
+            ));
+        }
     }
     if let Err(err) = std::fs::rename(&part_path, &final_path) {
         remove_part(&part_path);
@@ -446,8 +482,9 @@ fn remove_part(part: &Path) {
     }
 }
 
-/// 下载并校验到 `part` 路径；失败清理和成功后 rename 由 `download` 负责。
-fn download_to(m: &VegaManifest, part: &Path) -> ResultType<()> {
+/// 下载并校验到已由 `download` 用 `create_new` 建好的 `part` / `file`。
+/// 失败清理和成功后 rename 由 `download` 负责。
+fn download_to(m: &VegaManifest, part: &Path, mut file: std::fs::File) -> ResultType<()> {
     let client = if m.url.starts_with(MIRROR_ORIGIN) {
         mirror_client()?
     } else {
@@ -462,8 +499,6 @@ fn download_to(m: &VegaManifest, part: &Path) -> ResultType<()> {
         bail!("下载安装包返回错误状态 {}: {}", response.status(), m.url);
     }
 
-    let mut file = std::fs::File::create(part)
-        .with_context(|| format!("创建安装包临时文件失败: {}", part.display()))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; DOWNLOAD_BUF_BYTES];
     let mut total: u64 = 0;
