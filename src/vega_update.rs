@@ -404,8 +404,10 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
 ///    请求级 600s 超时，状态码必须成功；
 /// 4. 64 KiB 缓冲区流式写盘并同步更新 SHA-256，累计字节超过清单大小
 ///    立即中止；结束后字节数与哈希都必须与清单一致；
-/// 5. 全部通过才 `rename` 成最终文件名（已存在先删除）。只有本次调用
-///    成功 `create_new` 的 `.part` 才会被清理，建目录前的错误不删文件。
+/// 5. 全部通过才 `rename` 成最终文件名，直接覆盖已存在的旧安装包
+///    （Windows 上 rename 会替换目标）；失败只删本次的 `.part`，不动旧文件。
+///    只有本次调用成功 `create_new` 的 `.part` 才会被清理，建目录前的错误
+///    不删文件。
 pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
     verify_manifest(m)?;
     if !valid_version(&m.version) {
@@ -446,16 +448,8 @@ pub fn download(m: &VegaManifest) -> ResultType<PathBuf> {
         remove_part(&part_path);
         return Err(err);
     }
-    if final_path.exists() {
-        if let Err(err) = std::fs::remove_file(&final_path) {
-            remove_part(&part_path);
-            return Err(anyhow!(
-                "删除旧安装包文件失败 {}: {}",
-                final_path.display(),
-                err
-            ));
-        }
-    }
+    // 直接 rename 覆盖旧安装包：先删旧文件会在 rename 失败时把已有安装包
+    // 也一起丢掉。Windows 上 rename 目标已存在时会替换。
     if let Err(err) = std::fs::rename(&part_path, &final_path) {
         remove_part(&part_path);
         return Err(anyhow!(
