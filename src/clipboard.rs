@@ -46,10 +46,21 @@ const CLIPBOARD_GET_MAX_RETRY: usize = 3;
 #[cfg(not(target_os = "android"))]
 const CLIPBOARD_GET_RETRY_INTERVAL_DUR: Duration = Duration::from_millis(33);
 
-// Vega 修改：控制端写入序号。每次控制端写入请求开始时自增，旧请求在重试前比对，
+// Vega 修改：控制端写入序号。每次控制端写入请求在派发写入线程之前取号，旧请求在重试前比对，
 // 若期间已有更新的控制端写入，旧请求放弃，避免旧内容覆盖新内容。
 #[cfg(target_os = "windows")]
 static VEGA_CLIENT_WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Vega 修改：在派发写入线程之前取号，保证取号顺序与请求到达顺序一致。
+// 仅 Windows 控制端取号，其他情况返回 None，表示写入函数不做序号比对。
+#[cfg(target_os = "windows")]
+fn vega_next_write_seq(side: ClipboardSide) -> Option<u64> {
+    if side == ClipboardSide::Client {
+        Some(VEGA_CLIENT_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
+    } else {
+        None
+    }
+}
 
 #[cfg(not(target_os = "android"))]
 fn valid_rgba_dimensions(width: i32, height: i32, data_len: usize) -> Option<(usize, usize)> {
@@ -168,7 +179,8 @@ pub fn check_clipboard_files(
 pub fn update_clipboard_files(files: Vec<String>, side: ClipboardSide) {
     if !files.is_empty() {
         std::thread::spawn(move || {
-            do_update_clipboard_(vec![ClipboardData::FileUrl(files)], side);
+            // Vega 修改：文件写入路径不参与控制端序号比对（本函数仅 Linux 编译），传 None。
+            do_update_clipboard_(vec![ClipboardData::FileUrl(files)], side, None);
         });
     }
 }
@@ -252,24 +264,29 @@ pub fn check_clipboard_cm() -> ResultType<MultiClipboards> {
 }
 
 #[cfg(not(target_os = "android"))]
-fn update_clipboard_(multi_clipboards: Vec<Clipboard>, side: ClipboardSide) {
+fn update_clipboard_(
+    multi_clipboards: Vec<Clipboard>,
+    side: ClipboardSide,
+    my_write_seq: Option<u64>,
+) {
     let to_update_data = proto::from_multi_clipboards(multi_clipboards);
     if to_update_data.is_empty() {
         return;
     }
-    do_update_clipboard_(to_update_data, side);
+    do_update_clipboard_(to_update_data, side, my_write_seq);
 }
 
 #[cfg(not(target_os = "android"))]
-fn do_update_clipboard_(mut to_update_data: Vec<ClipboardData>, side: ClipboardSide) {
+// Vega 修改：`my_write_seq` 仅 Windows 分支使用，其他平台保留参数以免出现两套签名。
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
+fn do_update_clipboard_(
+    mut to_update_data: Vec<ClipboardData>,
+    side: ClipboardSide,
+    my_write_seq: Option<u64>,
+) {
     to_update_data = append_owner_marker(to_update_data, side);
-    // Vega 修改：仅 Windows 控制端路径取写入序号；第一次尝试不检查，保持原行为。
-    #[cfg(target_os = "windows")]
-    let my_write_seq = if side == ClipboardSide::Client {
-        Some(VEGA_CLIENT_WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
-    } else {
-        None
-    };
+    // Vega 修改：序号已由调用方在派发线程之前分配并传入，写入函数不再自己 fetch_add；
+    // 第一次尝试不检查，保持原行为。
     // Vega 修改：只有控制端（ClipboardSide::Client）写入本机剪贴板时才重试
     // ClipboardOccupied，被控端（Host）写入保持原行为。
     // 重试循环放在调用处而不是 ClipboardContext::set() 内，这样每次尝试都会重新获取
@@ -370,8 +387,14 @@ pub fn set_text_clipboard_with_owner_sync(text: &str, side: ClipboardSide) -> Re
 
 #[cfg(not(target_os = "android"))]
 pub fn update_clipboard(multi_clipboards: Vec<Clipboard>, side: ClipboardSide) {
+    // Vega 修改：控制端序号在派发线程之前分配（仅 Windows 控制端），
+    // 这样取号顺序等于请求到达顺序；写入函数只接收序号用于重试比对，不再自己分配。
+    #[cfg(target_os = "windows")]
+    let my_write_seq = vega_next_write_seq(side);
+    #[cfg(not(target_os = "windows"))]
+    let my_write_seq: Option<u64> = None;
     std::thread::spawn(move || {
-        update_clipboard_(multi_clipboards, side);
+        update_clipboard_(multi_clipboards, side, my_write_seq);
     });
 }
 
