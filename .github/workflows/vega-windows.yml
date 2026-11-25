@@ -405,10 +405,39 @@ jobs:
             Write-Host "installer exit code: $($p.ExitCode)"
           }
 
+          # 自解压安装包启动真正的安装进程后会先退出，-Wait 只等到自解压器结束；
+          # 覆盖安装时文件已存在，只能靠 LastWriteTimeUtc 变化判断替换完成。
+          function Wait-VegaReplaced([string]$path, $beforeUtc, [int]$timeoutSec) {
+            $deadline = (Get-Date).AddSeconds($timeoutSec)
+            while ((Get-Date) -lt $deadline) {
+              if ((Test-Path $path) -and ((Get-Item $path).LastWriteTimeUtc -ne $beforeUtc)) { return $true }
+              Start-Sleep 3
+            }
+            return ((Test-Path $path) -and ((Get-Item $path).LastWriteTimeUtc -ne $beforeUtc))
+          }
+
+          # 等真正的安装进程（vega.exe --silent-install / --install）全部退出再读 ID。
+          function Wait-NoInstallProcess([int]$timeoutSec) {
+            $deadline = (Get-Date).AddSeconds($timeoutSec)
+            while ($true) {
+              $procs = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -and ($_.CommandLine -match '--silent-install' -or $_.CommandLine -match '--install') })
+              if ($procs.Count -eq 0) { return $true }
+              if ((Get-Date) -ge $deadline) {
+                Write-Host "等待安装进程结束超时，仍在运行: $($procs.CommandLine -join ' | ')"
+                return $false
+              }
+              Start-Sleep 3
+            }
+          }
+
           # 1) 第一次安装
           Install-Vega $exe
           if (-not (Wait-VegaInstalled $installed 90)) {
             throw "首次安装失败"
+          }
+          if (-not (Wait-NoInstallProcess 60)) {
+            Write-Host "警告: 首次安装进程未在 60 秒内结束，继续读取 ID"
           }
           Write-Host "首次安装完成: $installed"
 
@@ -435,9 +464,15 @@ jobs:
           # 4) 覆盖安装（同一个安装程序再跑一次）
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
+          $t1 = (Get-Item $installed).LastWriteTimeUtc
+          Write-Host "覆盖安装前 LastWriteTimeUtc: $t1"
           Install-Vega $exe
-          if (-not (Wait-VegaInstalled $installed 90)) {
-            throw "覆盖安装失败"
+          if (-not (Wait-VegaReplaced $installed $t1 120)) {
+            throw "覆盖安装没有替换文件"
+          }
+          Write-Host "覆盖安装已替换文件: $((Get-Item $installed).LastWriteTimeUtc)"
+          if (-not (Wait-NoInstallProcess 60)) {
+            Write-Host "警告: 覆盖安装进程未在 60 秒内结束，继续读取 ID"
           }
           Write-Host "覆盖安装完成: $installed"
           $hash2 = (Get-FileHash -Path $installed -Algorithm SHA256).Hash
