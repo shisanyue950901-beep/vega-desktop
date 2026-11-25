@@ -291,18 +291,7 @@ void runMultiWindow(
 Future<void> _vegaShotCm() async {
   await initEnv(kAppTypeMain);
   desktopType = DesktopType.cm;
-  _runApp('', const DesktopServerPage(), MyTheme.currentThemeMode());
-  // 不调 showCmWindow：它会 mainHideDock（工具窗口），CI 按主窗口句柄截图会找不到。
-  await windowManager.waitUntilReadyToShow(
-      getHiddenTitleBarWindowOptions(
-          size: kConnectionManagerWindowSizeClosedChat),
-      null);
-  await windowManager.show();
-  await windowManager.focus();
-  await windowManager.setOpacity(1);
-  await windowManager.setSize(kConnectionManagerWindowSizeClosedChat);
-  setResizable(false);
-  await Future.delayed(const Duration(milliseconds: 500));
+  // 先把假连接放进模型和标签页，再起界面，避免依赖窗口回调时序。
   gFFI.serverModel.addConnection({
     'client': jsonEncode({
       'id': 1, 'authorized': true, 'is_file_transfer': false,
@@ -316,6 +305,17 @@ Future<void> _vegaShotCm() async {
   });
   gFFI.serverModel.cmHiddenTimer?.cancel();
   gFFI.serverModel.cmHiddenTimer = null;
+  _runApp('', const DesktopServerPage(), MyTheme.currentThemeMode());
+  // 不调 showCmWindow：它会 mainHideDock（工具窗口），CI 按主窗口句柄截图会找不到。
+  windowManager.waitUntilReadyToShow(
+      getHiddenTitleBarWindowOptions(
+          size: kConnectionManagerWindowSizeClosedChat),
+      () async {
+    await windowManager.show();
+    await windowManager.focus();
+    await windowManager.setOpacity(1);
+  });
+  setResizable(false);
 }
 
 void runConnectionManagerScreen() async {
