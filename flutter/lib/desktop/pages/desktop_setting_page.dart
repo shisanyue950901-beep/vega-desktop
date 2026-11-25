@@ -2769,8 +2769,11 @@ class _AboutState extends State<_About> {
               const SizedBox(
                 height: 8.0,
               ),
+              // Vega 修改：显示 Vega 产品版本，协议版本作为「基于 RustDesk」说明。
               SelectionArea(
-                  child: Text('${translate('Version')}: $version')
+                  child: Text(isWindows
+                          ? '${translate('Version')}: Vega ${bind.mainVegaVersion()}（基于 RustDesk $version）'
+                          : '${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
               // Vega 修改：应用内检查更新（仅 Windows）。
               if (isWindows) const VegaUpdateTile(),
@@ -2810,33 +2813,19 @@ class _AboutState extends State<_About> {
                     kVegaAboutLine,
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
-              Container(
-                decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
-                child: SelectionArea(
-                    child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.\n$license',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            translate('Slogan_tip'),
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white),
-                          )
-                        ],
-                      ),
-                    ),
-                  ],
-                )),
-              ).marginSymmetric(vertical: 4.0)
+              // Vega 修改：版权声明按 AGPL 保留上游原文，改为低调的说明文字；
+              // 去掉上游口号横幅，避免暗示 RustDesk 背书。
+              Builder(builder: (context) {
+                final p = VegaColors.of(context);
+                return SelectionArea(
+                  child: Text(
+                    'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.（RustDesk 原作者）\n'
+                    'Vega 为其修改版，按 AGPL-3.0 发布。\n$license',
+                    style: TextStyle(
+                        fontSize: 12, height: 1.5, color: p.secondary),
+                  ),
+                ).marginOnly(top: 10, bottom: 4);
+              }),
             ],
           ).marginOnly(left: _kContentHMargin)
         ]),

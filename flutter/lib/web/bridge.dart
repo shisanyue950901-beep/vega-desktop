@@ -1644,6 +1644,10 @@ class RustdeskImpl {
     throw UnimplementedError("installRunWithoutInstall");
   }
 
+  String mainVegaVersion({dynamic hint}) {
+    throw UnimplementedError("mainVegaVersion");
+  }
+
   bool installTakeFailed({dynamic hint}) {
     throw UnimplementedError("installTakeFailed");
   }
