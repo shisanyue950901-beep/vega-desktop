@@ -257,24 +257,58 @@ fn update_clipboard_(multi_clipboards: Vec<Clipboard>, side: ClipboardSide) {
 
 #[cfg(not(target_os = "android"))]
 fn do_update_clipboard_(mut to_update_data: Vec<ClipboardData>, side: ClipboardSide) {
-    let mut ctx = CLIPBOARD_CTX.lock().unwrap();
-    if ctx.is_none() {
-        match ClipboardContext::new() {
-            Ok(x) => {
-                *ctx = Some(x);
+    to_update_data = append_owner_marker(to_update_data, side);
+    // Vega 修改：只有控制端（ClipboardSide::Client）写入本机剪贴板时才重试
+    // ClipboardOccupied，被控端（Host）写入保持原行为。
+    // 重试循环放在调用处而不是 ClipboardContext::set() 内，这样每次尝试都会重新获取
+    // CLIPBOARD_CTX，set() 里的 ARBOARD_MTX 也只覆盖单次 set_formats，sleep 不持锁。
+    #[cfg(target_os = "windows")]
+    const CLIPBOARD_SET_MAX_RETRY: usize = 5;
+    #[cfg(target_os = "windows")]
+    let mut attempt = 1;
+    loop {
+        let result = {
+            let mut ctx = CLIPBOARD_CTX.lock().unwrap();
+            if ctx.is_none() {
+                match ClipboardContext::new() {
+                    Ok(x) => {
+                        *ctx = Some(x);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to create clipboard context: {}", e);
+                        return;
+                    }
+                }
             }
-            Err(e) => {
-                log::error!("Failed to create clipboard context: {}", e);
+            match ctx.as_mut() {
+                Some(ctx) => ctx.set(&to_update_data),
+                None => return,
+            }
+        };
+        match result {
+            Ok(()) => {
+                log::debug!("{} updated on {}", CLIPBOARD_NAME, side);
                 return;
             }
-        }
-    }
-    if let Some(ctx) = ctx.as_mut() {
-        to_update_data = append_owner_marker(to_update_data, side);
-        if let Err(e) = ctx.set(&to_update_data) {
-            log::debug!("Failed to set clipboard: {}", e);
-        } else {
-            log::debug!("{} updated on {}", CLIPBOARD_NAME, side);
+            Err(e) => {
+                #[cfg(target_os = "windows")]
+                if side == ClipboardSide::Client
+                    && attempt < CLIPBOARD_SET_MAX_RETRY
+                    && matches!(
+                        e.downcast_ref::<arboard::Error>(),
+                        Some(arboard::Error::ClipboardOccupied)
+                    )
+                {
+                    log::trace!(
+                        "Failed to set clipboard, clipboard is occupied, retrying... {attempt}/{CLIPBOARD_SET_MAX_RETRY}"
+                    );
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+                log::debug!("Failed to set clipboard: {}", e);
+                return;
+            }
         }
     }
 }
@@ -454,33 +488,11 @@ impl ClipboardContext {
     }
 
     fn set(&mut self, data: &[ClipboardData]) -> ResultType<()> {
+        // Vega 修改：锁只覆盖单次 set_formats 尝试；ClipboardOccupied 重试由调用处
+        // do_update_clipboard_ 负责（仅控制端），每次重试重新获取本锁，sleep 不持锁。
         let _lock = ARBOARD_MTX.lock().unwrap();
-        #[cfg(target_os = "windows")]
-        {
-            // Vega 修改：Windows 上剪贴板被其他程序短暂占用时重试，避免这次同步直接丢失。
-            const CLIPBOARD_SET_MAX_RETRY: usize = 5;
-            let mut attempt = 1;
-            loop {
-                match self.inner.set_formats(data) {
-                    Ok(()) => return Ok(()),
-                    Err(arboard::Error::ClipboardOccupied)
-                        if attempt < CLIPBOARD_SET_MAX_RETRY =>
-                    {
-                        log::debug!(
-                            "Failed to set clipboard, clipboard is occupied, retrying... {attempt}/{CLIPBOARD_SET_MAX_RETRY}"
-                        );
-                        attempt += 1;
-                        std::thread::sleep(Duration::from_millis(50));
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            self.inner.set_formats(data)?;
-            Ok(())
-        }
+        self.inner.set_formats(data)?;
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]
