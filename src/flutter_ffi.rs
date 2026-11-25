@@ -2447,6 +2447,24 @@ pub fn main_update_me() -> SyncReturn<bool> {
     SyncReturn(true)
 }
 
+pub fn main_vega_update_check() -> SyncReturn<bool> {
+    crate::vega_update::ui_start_check();
+    SyncReturn(true)
+}
+
+pub fn main_vega_update_install() -> SyncReturn<bool> {
+    crate::vega_update::ui_start_install();
+    SyncReturn(true)
+}
+
+pub fn main_vega_update_state() -> SyncReturn<String> {
+    SyncReturn(crate::vega_update::ui_state_json())
+}
+
+pub fn main_vega_update_pending() -> SyncReturn<String> {
+    SyncReturn(crate::vega_update::ui_pending_json())
+}
+
 pub fn set_cur_session_id(session_id: SessionID) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         set_cur_session_id_(session_id, &session.get_keyboard_mode())
