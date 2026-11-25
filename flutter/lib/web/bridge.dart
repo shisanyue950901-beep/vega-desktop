@@ -1616,6 +1616,22 @@ class RustdeskImpl {
     throw UnimplementedError("mainUpdateMe");
   }
 
+  bool mainVegaUpdateCheck({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateCheck");
+  }
+
+  bool mainVegaUpdateInstall({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateInstall");
+  }
+
+  String mainVegaUpdateState({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateState");
+  }
+
+  String mainVegaUpdatePending({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdatePending");
+  }
+
   Future<void> setCurSessionId({required UuidValue sessionId, dynamic hint}) {
     throw UnimplementedError("setCurSessionId");
   }

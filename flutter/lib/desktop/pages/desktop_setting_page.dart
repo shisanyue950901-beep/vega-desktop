@@ -29,6 +29,7 @@ import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import 'package:flutter_hbb/vega_links.dart';
 import 'package:flutter_hbb/vega_theme.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_update_tile.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -2771,6 +2772,8 @@ class _AboutState extends State<_About> {
               SelectionArea(
                   child: Text('${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
+              // Vega 修改：应用内检查更新（仅 Windows）。
+              if (isWindows) const VegaUpdateTile(),
               SelectionArea(
                   child: Text('${translate('Build Date')}: $buildDate')
                       .marginSymmetric(vertical: 4.0)),
