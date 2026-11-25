@@ -835,9 +835,14 @@ pub fn ui_start_install() {
                     }
                     match install(&m, &path) {
                         Ok(()) => {
-                            // 安装成功时安装程序会终止当前进程，能返回 Ok 说明安装
-                            // 并没有真正生效；清掉待确认记录，保留 manifest 与版本
-                            // 让界面可以从 error 再次点击安装。
+                            // `install` 返回 Ok 只代表外层自解压 exe 已经退出，真正的
+                            // `--update` 子进程可能还在覆盖安装文件，此刻本进程仍然
+                            // 活着是正常现象，不能立刻判失败。所以保持 installing 状态
+                            // 在本线程原地等 180 秒：安装成功时安装程序会在这段时间内
+                            // 终止本进程，根本执行不到下面的代码。180 秒后进程仍在运行，
+                            // 才认定安装没有完成——删除待确认记录并落 error，但保留
+                            // manifest 与版本，让界面可以从 error 再次点击安装重试。
+                            std::thread::sleep(std::time::Duration::from_secs(180));
                             remove_pending();
                             let mut state = ui_lock();
                             state.phase = "error";
