@@ -62,8 +62,9 @@ const MAX_UPDATE_SIZE: u64 = 300 * 1024 * 1024;
 /// 防回退下限文件（独立文件，临时文件 + rename 原子替换）。
 const FLOOR_FILE: &str = "vega-update-floor";
 
-/// 待确认安装版本文件：`install` 交出安装包后写入，
-/// 下次启动由 [`pending_result`] 读取并删除。
+/// 待确认安装版本文件：`install` 在交出安装包**之前**写入（成功安装时旧进程
+/// 会被安装程序终止，返回后再写来不及），下次启动由 [`pending_result`]
+/// 读取并删除。
 const PENDING_FILE: &str = "vega-update-pending";
 
 /// 保护下限文件的读-改-写，避免并发检查互相覆盖。
@@ -228,6 +229,22 @@ fn write_pending(v: &str) -> ResultType<()> {
     )
 }
 
+/// 删除待确认安装版本：安装没交接成功时用，避免下次启动误报。
+/// 文件本就不存在不算失败，其余错误只记日志。
+#[cfg(windows)]
+fn remove_pending() {
+    let path = Config::path(PENDING_FILE);
+    if let Err(err) = std::fs::remove_file(&path) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            log::warn!(
+                "删除 Vega 更新待确认文件失败 {}: {}",
+                path.display(),
+                err
+            );
+        }
+    }
+}
+
 /// 接受清单版本作为新的下限：读取、比较、写入在同一临界区完成。
 /// 低于本地下限直接拒绝，高于下限（或尚无下限）则落盘。
 fn accept_floor(m: &VegaManifest) -> ResultType<()> {
@@ -249,8 +266,9 @@ fn accept_floor(m: &VegaManifest) -> ResultType<()> {
 /// 读取并清除上次安装的待确认结果。
 ///
 /// `install` 的 `Ok` 只表示安装包已交给系统安装程序，安装程序会在新进程里
-/// 替换并重启 Vega，结果无法跨进程返回；因此交接后会把目标版本原子写入
-/// `vega-update-pending`，由下一次启动在这里判定：
+/// 替换并重启 Vega，结果无法跨进程返回；因此 `install` 在交接**之前**就把
+/// 目标版本原子写入 `vega-update-pending` 再启动安装，交接失败会删掉它；
+/// 所以重启后这里看到的文件一定对应一次已启动的安装：
 /// - 没有待确认文件返回 `None`；
 /// - 当前运行版本（与 `is_newer` 同用 `crate::VERSION`）不低于待确认版本，
 ///   删除文件并返回 `Some(Ok(版本))`；
@@ -639,9 +657,15 @@ fn download_to(m: &VegaManifest, part: &Path, mut file: std::fs::File) -> Result
 /// 本函数不退出程序，调用方可以继续运行旧版本。
 ///
 /// `Ok` 只表示安装包已交给系统安装程序，不代表安装成功：安装程序会在
-/// 新进程里替换并重启 Vega，结果无法跨进程返回。交接后会把 `m.version`
-/// 原子写入 `vega-update-pending`，重启后由 [`pending_result`] 判断更新
-/// 是否真的生效。
+/// 新进程里替换并重启 Vega，结果无法跨进程返回。
+///
+/// 记录顺序很关键：成功安装时安装程序会终止旧进程，`update_to_verified`
+/// 返回后再写 `vega-update-pending` 根本来不及。因此本函数在防回退检查与
+/// 路径核对都通过之后、调用 `crate::platform::update_to_verified` **之前**
+/// 就原子写入 `m.version`；写失败直接返回 `Err`、不启动安装。若交接本身
+/// 失败（例如 UAC 被取消），删除刚写的待确认文件后返回原错误，避免下次
+/// 启动误判为“安装未生效”。重启后由 [`pending_result`] 判断更新是否真的
+/// 生效。
 #[cfg(windows)]
 pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
     verify_manifest(m).context("安装前重新校验 Vega 清单失败")?;
@@ -676,13 +700,21 @@ pub fn install(m: &VegaManifest, path: &std::path::Path) -> ResultType<()> {
     let Some(path_str) = path.to_str() else {
         bail!("安装包路径不是合法 UTF-8: {}", path.display());
     };
-    crate::platform::update_to_verified(path_str, &m.sha256, m.size).with_context(|| {
-        format!(
-            "启动 Vega 安装包失败（UAC 被取消或安装未完成）: {}",
-            path.display()
-        )
-    })?;
-    log::info!("Vega 安装包已交给系统提权安装: {}", path.display());
+    // 先原子记录待确认版本再交接：成功安装时旧进程会被安装程序终止，
+    // 返回后再写来不及；写不进去就不启动安装，避免装了却无法在重启后确认。
     write_pending(&m.version).context("记录 Vega 更新待确认版本失败")?;
+    if let Err(err) =
+        crate::platform::update_to_verified(path_str, &m.sha256, m.size).with_context(|| {
+            format!(
+                "启动 Vega 安装包失败（UAC 被取消或安装未完成）: {}",
+                path.display()
+            )
+        })
+    {
+        // 交接失败，安装没开始，删掉待确认记录，保留原始错误返回。
+        remove_pending();
+        return Err(err);
+    }
+    log::info!("Vega 安装包已交给系统提权安装: {}", path.display());
     Ok(())
 }
