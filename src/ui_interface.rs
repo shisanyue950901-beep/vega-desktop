@@ -107,6 +107,7 @@ pub fn goto_install() {
 pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) {
     #[cfg(windows)]
     std::thread::spawn(move || {
+        // Vega 修改：UAC 取消或安装失败时保留窗口，用户可再点安装
         if let Err(err) = crate::platform::windows::install_me(&_options, _path, _silent, _debug) {
             log::error!("Installation failed: {err:#}");
             if !_silent
@@ -118,6 +119,7 @@ pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) 
             {
                 crate::platform::windows::message_box(&format!("Installation failed:\n{err:#}!"));
             }
+            return;
         }
         std::process::exit(0);
     });
