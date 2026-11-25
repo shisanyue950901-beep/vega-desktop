@@ -27,7 +27,7 @@ import '../widgets/vega_window_glass.dart';
 // Vega：毛玻璃开启时，窗口底色透明，卡片半透明。
 // 底色保留一层半透明色，系统没画出模糊时也看得清。
 Color _vegaBg(Color solid) =>
-    VegaGlass.active ? solid.withOpacity(0.45) : solid;
+    VegaGlass.active ? solid.withOpacity(0.65) : solid;
 Color _vegaCard(VegaPalette p) =>
     VegaGlass.active ? p.card.withOpacity(p.isDark ? 0.55 : 0.70) : p.card;
 

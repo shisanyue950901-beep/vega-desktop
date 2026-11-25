@@ -2976,14 +2976,19 @@ Widget _OptionCheckBox(
           child: SizedBox(
             height: 38,
             child: Row(children: [
-              Flexible(
-                child: Text(translate(label),
-                    style: TextStyle(
-                        fontSize: 14,
-                        color: disabledTextColor(context, enabled))),
+              // Expanded（而非 Flexible + Spacer）：两者各占一半剩余宽度，
+              // 开关会停在行中间；现在文字占满，开关贴右。
+              Expanded(
+                child: Row(children: [
+                  Flexible(
+                    child: Text(translate(label),
+                        style: TextStyle(
+                            fontSize: 14,
+                            color: disabledTextColor(context, enabled))),
+                  ),
+                  if (trailing != null) trailing,
+                ]),
               ),
-              if (trailing != null) trailing,
-              const Spacer(),
               Transform.scale(
                 scale: 0.8,
                 child: Switch(
