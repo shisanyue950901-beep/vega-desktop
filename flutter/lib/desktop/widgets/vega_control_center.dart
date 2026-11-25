@@ -49,6 +49,8 @@ class VegaCcActions {
   final VoidCallback? onRestart;
   final VoidCallback? onScreenshot;
   final VoidCallback? onDisconnect;
+  // 打开原版完整工具栏（键盘模式、多显示器等暂未搬进控制中心的功能）。
+  final VoidCallback? onMore;
 
   const VegaCcActions({
     this.onQuality,
@@ -60,6 +62,7 @@ class VegaCcActions {
     this.onRestart,
     this.onScreenshot,
     this.onDisconnect,
+    this.onMore,
   });
 }
 
@@ -328,6 +331,15 @@ class _Panel extends StatelessWidget {
                         icon: Icons.photo_camera_outlined,
                         label: '截图',
                         onTap: actions.onScreenshot)),
+                if (actions.onMore != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: _ActionChip(
+                          dark: dark,
+                          icon: Icons.more_horiz_rounded,
+                          label: '更多',
+                          onTap: actions.onMore)),
+                ],
               ],
             ),
             const SizedBox(height: 12),

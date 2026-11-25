@@ -23,6 +23,7 @@ import '../../utils/image.dart';
 import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
+import '../widgets/vega_remote_cc.dart';
 import 'macos_full_screen_focus_recovery.dart';
 
 import 'package:flutter_hbb/native/custom_cursor.dart'
@@ -89,6 +90,9 @@ class _RemotePageState extends State<RemotePage>
         MultiWindowListener,
         WidgetsBindingObserver,
         TickerProviderStateMixin {
+  // Vega 修改：是否显示原版完整工具栏（默认只显示控制中心）。
+  final RxBool _vegaLegacyToolbar = false.obs;
+
   Timer? _timer;
   String keyboardMode = "legacy";
   bool _isWindowBlur = false;
@@ -712,6 +716,26 @@ class _RemotePageState extends State<RemotePage>
       );
 
   Widget buildBody(BuildContext context) {
+    // Vega 修改：顶部显示控制中心；点「更多」切换出原版完整工具栏，
+    // 此时控制中心移到右上角，再点「更多」收回。
+    Widget vegaToolbar(BuildContext context) => Obx(() {
+          final legacy = _vegaLegacyToolbar.value;
+          return Stack(children: [
+            Offstage(offstage: !legacy, child: remoteToolbar(context)),
+            Align(
+              alignment: legacy ? Alignment.topRight : Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6, right: 8),
+                child: VegaRemoteCc(
+                  id: widget.id,
+                  ffi: _ffi,
+                  onMore: () => _vegaLegacyToolbar.toggle(),
+                ),
+              ),
+            ),
+          ]);
+        });
+
     remoteToolbar(BuildContext context) => RemoteToolbar(
           id: widget.id,
           ffi: _ffi,
@@ -789,9 +813,9 @@ class _RemotePageState extends State<RemotePage>
                   ? const Offstage()
                   : _ffi.ffiModel.pi.isSet.isTrue
                       ? Overlay(initialEntries: [
-                          OverlayEntry(builder: remoteToolbar)
+                          OverlayEntry(builder: vegaToolbar)
                         ])
-                      : remoteToolbar(context)),
+                      : vegaToolbar(context)),
               _ffi.ffiModel.pi.isSet.isFalse ? emptyOverlay() : Offstage(),
             ],
           ),
