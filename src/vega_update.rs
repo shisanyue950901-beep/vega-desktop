@@ -6,9 +6,20 @@
 //! 注意：这是新一代 Vega 的专用地址，绝不能用 0.6.x 旧控制台的
 //! `/vega/updates/latest.json`。
 
-use hbb_common::{anyhow::bail, anyhow::Context, log, ResultType};
+use hbb_common::{
+    anyhow::{anyhow, bail, Context},
+    base64::{engine::general_purpose::STANDARD, Engine as _},
+    config::LocalConfig,
+    log,
+    sodiumoxide::{
+        self,
+        crypto::sign::{verify_detached, PublicKey, Signature},
+    },
+    ResultType,
+};
 use serde_derive::Deserialize;
 use std::io::Read;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// 新一代 Vega 更新清单镜像（国内直连，走 HTTP）。
@@ -23,6 +34,21 @@ const MAX_BODY_BYTES: usize = 64 * 1024;
 /// GitHub 兜底最多跟随 5 次重定向。
 const MAX_REDIRECTS: usize = 5;
 
+/// Vega 更新专用 Ed25519 公钥（32 字节，base64）。
+pub const UPDATE_PUBKEY_B64: &str = "lLXThXxL64J++SDf7KReHhz6XhrpVvHtcaSatxZQ+h8=";
+
+/// 清单里下载地址必须命中以下前缀之一。
+const UPDATE_URL_PREFIXES: [&str; 2] = [
+    "https://github.com/shisanyue950901-beep/vega-desktop/releases/download/",
+    "http://60.205.95.98/vega/desktop/",
+];
+
+/// 安装包大小上限：300 MiB。下限为 1 字节。
+const MAX_UPDATE_SIZE: u64 = 300 * 1024 * 1024;
+
+/// 防回退记录键：本地已见过的最新清单版本。
+const LAST_SEEN_KEY: &str = "vega-update-last-seen";
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct VegaManifest {
     pub version: String,
@@ -34,6 +60,90 @@ pub struct VegaManifest {
     pub sha256: String,
     #[serde(default)]
     pub signature: String,
+    #[serde(default)]
+    pub pub_date: String,
+    #[serde(default)]
+    pub size: u64,
+}
+
+/// 待签名内容：字段按固定顺序拼接，任一处被改都会验签失败。
+fn signed_message(m: &VegaManifest) -> String {
+    format!(
+        "vega-desktop-update\n{}\n{}\n{}\n{}\n{}",
+        m.version, m.pub_date, m.url, m.sha256, m.size
+    )
+}
+
+fn init_sodiumoxide() -> ResultType<()> {
+    static INIT: OnceLock<Result<(), String>> = OnceLock::new();
+    let result = INIT.get_or_init(|| {
+        sodiumoxide::init().map_err(|_| "sodiumoxide 初始化失败".to_string())
+    });
+    match result {
+        Ok(()) => Ok(()),
+        Err(err) => Err(anyhow!(err.clone())),
+    }
+}
+
+fn decode_pubkey() -> ResultType<PublicKey> {
+    let raw = STANDARD
+        .decode(UPDATE_PUBKEY_B64)
+        .context("内置 Vega 更新公钥不是合法 base64")?;
+    if raw.len() != 32 {
+        bail!("内置 Vega 更新公钥长度不是 32 字节: {}", raw.len());
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&raw);
+    Ok(PublicKey(key))
+}
+
+fn decode_signature(encoded: &str) -> ResultType<Signature> {
+    let raw = STANDARD
+        .decode(encoded)
+        .context("清单签名不是合法 base64")?;
+    if raw.len() != 64 {
+        bail!("清单签名长度不是 64 字节: {}", raw.len());
+    }
+    let mut sig = [0u8; 64];
+    sig.copy_from_slice(&raw);
+    Signature::from_bytes(&sig).map_err(|_| anyhow!("清单签名字节无效"))
+}
+
+/// 校验清单：Ed25519 detached 签名 + 字段约束。任一不满足返回 Err。
+fn verify_manifest(m: &VegaManifest) -> ResultType<()> {
+    init_sodiumoxide()?;
+    let signature = decode_signature(&m.signature)?;
+    let pubkey = decode_pubkey()?;
+
+    if m.sha256.len() != 64
+        || !m
+            .sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        bail!("清单 sha256 不是 64 位小写十六进制: {:?}", m.sha256);
+    }
+    if m.size == 0 || m.size > MAX_UPDATE_SIZE {
+        bail!("清单安装包大小越界: {} 字节", m.size);
+    }
+    if !UPDATE_URL_PREFIXES.iter().any(|p| m.url.starts_with(*p)) {
+        bail!("清单下载地址不在允许的 Vega 发布地址内: {:?}", m.url);
+    }
+
+    let message = signed_message(m);
+    if !verify_detached(&signature, message.as_bytes(), &pubkey) {
+        bail!("清单 Ed25519 签名校验失败: {}", m.version);
+    }
+    Ok(())
+}
+
+/// 本地记录过的最高清单版本（空串表示尚未记录）。
+fn last_seen() -> String {
+    LocalConfig::get_option(LAST_SEEN_KEY)
+}
+
+fn set_last_seen(v: &str) {
+    LocalConfig::set_option(LAST_SEEN_KEY.to_owned(), v.to_owned());
 }
 
 /// 先请求镜像（绕过系统代理），失败再请求 GitHub（走环境变量代理）。
@@ -80,6 +190,9 @@ fn fetch_mirror() -> ResultType<VegaManifest> {
             MIRROR_URL
         );
     }
+    if let Err(err) = verify_manifest(&manifest) {
+        bail!("镜像清单校验失败，按镜像失败处理: {}", err);
+    }
     Ok(manifest)
 }
 
@@ -114,6 +227,8 @@ fn fetch_fallback() -> ResultType<VegaManifest> {
     if !valid_version(&manifest.version) {
         bail!("GitHub 清单版本号无效: {:?}", manifest.version);
     }
+    verify_manifest(&manifest)
+        .with_context(|| format!("GitHub 清单校验失败: {}", FALLBACK_URL))?;
     Ok(manifest)
 }
 
@@ -172,7 +287,22 @@ pub fn check() -> ResultType<Option<VegaManifest>> {
     if !valid_version(&manifest.version) {
         bail!("远端版本号无效: {:?}", manifest.version);
     }
+    let seen = last_seen();
+    match parse_version(&seen) {
+        Some(seen_version) if parse_version(&manifest.version) < Some(seen_version) => {
+            bail!(
+                "清单版本回退: 远端 {} 低于本地已见 {}",
+                manifest.version,
+                seen
+            );
+        }
+        None if !seen.is_empty() => {
+            log::warn!("Vega 忽略无法解析的本地已见版本记录: {:?}", seen);
+        }
+        _ => {}
+    }
     if is_newer(&manifest.version) {
+        set_last_seen(&manifest.version);
         log::info!(
             "Vega 发现新版本: {}（当前 {}）",
             manifest.version,
