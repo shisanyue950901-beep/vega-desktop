@@ -2448,21 +2448,52 @@ pub fn main_update_me() -> SyncReturn<bool> {
 }
 
 pub fn main_vega_update_check() -> SyncReturn<bool> {
-    crate::vega_update::ui_start_check();
-    SyncReturn(true)
+    // crate::vega_update 仅在 Windows 编译，函数本身保持无条件导出，由体内 cfg 分流
+    #[cfg(windows)]
+    {
+        crate::vega_update::ui_start_check();
+        SyncReturn(true)
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(false)
+    }
 }
 
 pub fn main_vega_update_install() -> SyncReturn<bool> {
-    crate::vega_update::ui_start_install();
-    SyncReturn(true)
+    #[cfg(windows)]
+    {
+        crate::vega_update::ui_start_install();
+        SyncReturn(true)
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(false)
+    }
 }
 
 pub fn main_vega_update_state() -> SyncReturn<String> {
-    SyncReturn(crate::vega_update::ui_state_json())
+    #[cfg(windows)]
+    {
+        SyncReturn(crate::vega_update::ui_state_json())
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(
+            r#"{"phase":"error","version":"","notes":"","error":"仅支持 Windows"}"#.to_owned(),
+        )
+    }
 }
 
 pub fn main_vega_update_pending() -> SyncReturn<String> {
-    SyncReturn(crate::vega_update::ui_pending_json())
+    #[cfg(windows)]
+    {
+        SyncReturn(crate::vega_update::ui_pending_json())
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(r#"{"result":"none"}"#.to_owned())
+    }
 }
 
 pub fn set_cur_session_id(session_id: SessionID) {
