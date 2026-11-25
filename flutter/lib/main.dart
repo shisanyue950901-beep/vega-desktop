@@ -296,6 +296,24 @@ void runConnectionManagerScreen() async {
   } else {
     await showCmWindow(isStartup: true);
   }
+  // Vega：CI 截图用，VEGA_SHOT_CM=1 时塞一个假的已授权连接，展示被控端小窗。
+  if (Platform.environment['VEGA_SHOT_CM'] == '1') {
+    Future.delayed(const Duration(seconds: 2), () {
+      gFFI.serverModel.addConnection({
+        'client': jsonEncode({
+          'id': 1, 'authorized': true, 'is_file_transfer': false,
+          'is_view_camera': false, 'is_terminal': false, 'port_forward': '',
+          'name': 'Caps-PC', 'avatar': '', 'peer_id': '123456789',
+          'keyboard': true, 'clipboard': true, 'audio': true, 'file': true,
+          'restart': true, 'recording': false, 'block_input': false,
+          'privacy_mode': false, 'disconnected': false, 'from_switch': false,
+          'in_voice_call': false, 'incoming_voice_call': false,
+        })
+      });
+      gFFI.serverModel.cmHiddenTimer?.cancel();
+      gFFI.serverModel.cmHiddenTimer = null;
+    });
+  }
   setResizable(false);
   // Start the uni links handler and redirect links to Native, not for Flutter.
   listenUniLinks(handleByFlutter: false);

@@ -327,10 +327,20 @@ jobs:
             try { Invoke-VegaShot $nav[1] } catch { Write-Host "nav capture failed: $_" }
           }
           Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_CM = "1"
+          try { Invoke-VegaShot "shot-cm.png" @("--cm") } catch { Write-Host "cm capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
           Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_CM = "1"
+          try { Invoke-VegaShot "shot-cm-dark.png" @("--cm") } catch { Write-Host "cm dark capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           try { Invoke-VegaShot "shot-install-dark.png" @("--install") } catch { Write-Host "install dark capture failed: $_" }
