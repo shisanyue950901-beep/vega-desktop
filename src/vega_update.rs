@@ -52,19 +52,21 @@ pub fn fetch_manifest() -> ResultType<VegaManifest> {
 }
 
 /// 镜像客户端不复用仓库 hbbs_http 的现成客户端：自建客户端并
-/// `.no_proxy()`，不读取系统代理，直连镜像；不跟随重定向；
-/// 10s 总超时、5s 连接超时。构建失败直接返回 Err，由 `fetch_manifest`
-/// 转去 GitHub 兜底。
+/// `.no_proxy()`，不读取系统代理，直连镜像；关闭 gzip/zstd 自动解压；
+/// 不跟随重定向；请求级 10s 超时（覆盖读完响应体）、5s 连接超时。
+/// 构建失败直接返回 Err，由 `fetch_manifest` 转去 GitHub 兜底。
 fn fetch_mirror() -> ResultType<VegaManifest> {
     let client = reqwest::blocking::Client::builder()
         .no_proxy()
-        .timeout(HTTP_TIMEOUT)
+        .no_gzip()
+        .no_zstd()
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("创建 Vega 镜像更新检查客户端失败")?;
     let response = client
         .get(MIRROR_URL)
+        .timeout(HTTP_TIMEOUT)
         .send()
         .with_context(|| format!("请求镜像失败: {}", MIRROR_URL))?;
     if !response.status().is_success() {
@@ -85,9 +87,8 @@ fn fetch_mirror() -> ResultType<VegaManifest> {
 /// 不读取 Windows 系统代理设置。重定向仅允许 https，最多 5 次，否则中止。
 fn fetch_fallback() -> ResultType<VegaManifest> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if attempt.previous().len() >= MAX_REDIRECTS {
+            if attempt.previous().len() > MAX_REDIRECTS {
                 attempt.error("GitHub 清单重定向次数超过 5 次")
             } else if attempt.url().scheme() != "https" {
                 attempt.error("GitHub 清单重定向目标不是 HTTPS")
@@ -99,6 +100,7 @@ fn fetch_fallback() -> ResultType<VegaManifest> {
         .context("创建 GitHub 更新检查客户端失败")?;
     let response = client
         .get(FALLBACK_URL)
+        .timeout(HTTP_TIMEOUT)
         .send()
         .with_context(|| format!("请求 GitHub 清单失败: {}", FALLBACK_URL))?;
     if !response.status().is_success() {
@@ -131,18 +133,37 @@ fn read_manifest(response: reqwest::blocking::Response, url: &str) -> ResultType
 
 /// 版本号必须恰好 3 段，以 '.' 分隔，每段 1–4 位纯 ASCII 数字（如 1.5.3）。
 fn valid_version(v: &str) -> bool {
-    let parts: Vec<&str> = v.split('.').collect();
-    parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|b| b.is_ascii_digit()))
+    parse_version(v).is_some() && v.split('.').all(|p| !p.is_empty() && p.len() <= 4)
 }
 
-/// 远端版本是否比当前运行版本新。比较逻辑复用 hbb_common 的
-/// `get_version_number`（与 common.rs 里软件更新检查保持一致）。
-/// 只在 `valid_version` 通过后调用。
+/// 解析版本号：恰好 3 段纯 ASCII 数字（不接受正负号、空白或空段），
+/// 逐段转 u32；段数不对或任一段非数字返回 None。
+fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = v.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    let patch = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let pure_digits = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    if !pure_digits(major) || !pure_digits(minor) || !pure_digits(patch) {
+        return None;
+    }
+    Some((
+        major.parse::<u32>().ok()?,
+        minor.parse::<u32>().ok()?,
+        patch.parse::<u32>().ok()?,
+    ))
+}
+
+/// 远端版本是否比当前运行版本新：两段都按 (u32, u32, u32) 逐段比较，
+/// 任一侧解析失败返回 false。只在 `valid_version` 通过后调用。
 fn is_newer(remote: &str) -> bool {
-    hbb_common::get_version_number(remote) > hbb_common::get_version_number(crate::VERSION)
+    match (parse_version(remote), parse_version(crate::VERSION)) {
+        (Some(remote), Some(current)) => remote > current,
+        _ => false,
+    }
 }
 
 /// 有新版本时返回清单，否则返回 None。
