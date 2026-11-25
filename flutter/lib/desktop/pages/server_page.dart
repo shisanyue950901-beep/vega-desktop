@@ -516,7 +516,9 @@ class _CmHeaderState extends State<_CmHeader>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'ID ${client.peerId} · $_typeLabel',
+                      client.type_() == ClientType.remote
+                          ? 'ID ${client.peerId}'
+                          : 'ID ${client.peerId} · $_typeLabel',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: palette.secondary, fontSize: 12),
