@@ -767,28 +767,37 @@ pub fn ui_start_check() {
         state.error.clear();
         state.manifest = None;
     }
-    let _ = std::thread::spawn(move || match check() {
-        Ok(Some(m)) => {
-            let mut state = ui_lock();
-            state.phase = "available";
-            state.version = m.version.clone();
-            state.notes = m.notes.clone();
-            state.error.clear();
-            state.manifest = Some(m);
-        }
-        Ok(None) => {
-            let mut state = ui_lock();
-            state.phase = "latest";
-            state.version.clear();
-            state.notes.clear();
-            state.error.clear();
-            state.manifest = None;
-        }
-        Err(err) => ui_fail(err),
-    });
+    if let Err(err) = std::thread::Builder::new()
+        .name("vega-update".into())
+        .spawn(move || match check() {
+            Ok(Some(m)) => {
+                let mut state = ui_lock();
+                state.phase = "available";
+                state.version = m.version.clone();
+                state.notes = m.notes.clone();
+                state.error.clear();
+                state.manifest = Some(m);
+            }
+            Ok(None) => {
+                let mut state = ui_lock();
+                state.phase = "latest";
+                state.version.clear();
+                state.notes.clear();
+                state.error.clear();
+                state.manifest = None;
+            }
+            Err(err) => ui_fail(err),
+        })
+    {
+        // 线程没起来就停在 checking 会让界面一直转圈，这里落错误状态。
+        log::warn!("启动 Vega 更新检查线程失败: {}", err);
+        let mut state = ui_lock();
+        state.phase = "error";
+        state.error = "无法启动后台任务".to_string();
+    }
 }
 
-/// 从 available 状态后台下载并安装；非 Windows 直接报错。
+/// 从 available（或上次安装未完成的 error）状态后台下载并安装；非 Windows 直接报错。
 pub fn ui_start_install() {
     #[cfg(not(windows))]
     {
@@ -804,7 +813,8 @@ pub fn ui_start_install() {
     {
         let m = {
             let mut state = ui_lock();
-            if state.phase != "available" {
+            // available 正常开始；error 且还留着 manifest 时允许重试安装。
+            if !matches!(state.phase, "available" | "error") {
                 return;
             }
             let Some(m) = state.manifest.clone() else {
@@ -814,19 +824,37 @@ pub fn ui_start_install() {
             state.error.clear();
             m
         };
-        let _ = std::thread::spawn(move || match download(&m) {
-            Ok(path) => {
-                {
-                    let mut state = ui_lock();
-                    state.phase = "installing";
-                    state.error.clear();
+        if let Err(err) = std::thread::Builder::new()
+            .name("vega-update".into())
+            .spawn(move || match download(&m) {
+                Ok(path) => {
+                    {
+                        let mut state = ui_lock();
+                        state.phase = "installing";
+                        state.error.clear();
+                    }
+                    match install(&m, &path) {
+                        Ok(()) => {
+                            // 安装成功时安装程序会终止当前进程，能返回 Ok 说明安装
+                            // 并没有真正生效；清掉待确认记录，保留 manifest 与版本
+                            // 让界面可以从 error 再次点击安装。
+                            remove_pending();
+                            let mut state = ui_lock();
+                            state.phase = "error";
+                            state.error = "安装没有完成，请重试".to_string();
+                        }
+                        Err(err) => ui_fail(err),
+                    }
                 }
-                if let Err(err) = install(&m, &path) {
-                    ui_fail(err);
-                }
-            }
-            Err(err) => ui_fail(err),
-        });
+                Err(err) => ui_fail(err),
+            })
+        {
+            // 线程没起来就停在 downloading 会让界面一直转圈，这里落错误状态。
+            log::warn!("启动 Vega 更新安装线程失败: {}", err);
+            let mut state = ui_lock();
+            state.phase = "error";
+            state.error = "无法启动后台任务".to_string();
+        }
     }
 }
 
@@ -851,7 +879,14 @@ pub fn ui_state_json() -> String {
 }
 
 /// 上次安装的待确认结果 JSON。
+///
+/// 判断“是否可以消费待确认文件”和消费本身必须在同一个临界区里完成：
+/// 下载/安装进行中直接返回 none，避免刚交接的新一轮安装被误判成上次失败。
 pub fn ui_pending_json() -> String {
+    let state = ui_lock();
+    if matches!(state.phase, "downloading" | "installing") {
+        return serde_json::json!({ "result": "none" }).to_string();
+    }
     match pending_result() {
         None => serde_json::json!({ "result": "none" }).to_string(),
         Some(Ok(version)) => serde_json::json!({ "result": "ok", "version": version }).to_string(),
