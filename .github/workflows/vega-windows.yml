@@ -439,15 +439,47 @@ jobs:
             throw ("安装超时(180s)未满足: " + ($reasons -join '; '))
           }
 
-          # 服务刚启动时 --get-id 可能短暂拿不到值，最多重试 60 秒，取非空输出 Trim 后返回。
-          function Get-VegaId([string]$exePath) {
-            $deadline = (Get-Date).AddSeconds(60)
+          # 不用 --set-id（会联网注册），也不用 --get-id / --option KEY 读回
+          # （可能命中 runner 用户的本地缓存，证明不了服务侧状态）。
+          # 设备 ID 只从服务自己写的 Vega.toml 取；"标记生效"只以服务写盘的
+          # Vega2.toml 包含该标记为准；"覆盖安装真的执行"以被删掉的安装目录
+          # 文件重新出现为准。
+          $installDir = Join-Path $env:ProgramFiles "Vega"
+          $cfgCandidates = @(
+            Join-Path $env:windir "ServiceProfiles\LocalService\AppData\Roaming\Vega\config",
+            Join-Path $env:windir "System32\config\systemprofile\AppData\Roaming\Vega\config"
+          )
+          $userCfgDir = Join-Path $env:APPDATA "Vega\config"
+
+          # 在候选目录里等一个存在的 Vega.toml，返回完整路径（超时返回 $null）。
+          function Find-VegaToml([string[]]$dirs, [int]$timeoutSec) {
+            $deadline = (Get-Date).AddSeconds($timeoutSec)
             while ($true) {
-              $out = (& $exePath --get-id 2>$null | Out-String).Trim()
-              if (-not [string]::IsNullOrEmpty($out)) { return $out }
-              if ((Get-Date) -ge $deadline) { throw "60 秒内没有读到设备 ID" }
+              foreach ($d in $dirs) {
+                $f = Join-Path $d "Vega.toml"
+                if (Test-Path -LiteralPath $f) { return $f }
+              }
+              if ((Get-Date) -ge $deadline) { return $null }
               Start-Sleep 2
             }
+          }
+
+          # 从 Vega.toml 的 id = '...' / id = "..." 取值，取不到返回空串。
+          function Get-ConfigId([string]$path) {
+            if (-not (Test-Path -LiteralPath $path)) { return "" }
+            $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrEmpty($text)) { return "" }
+            # toml::to_string_pretty 写出来是 `id = "..."` / `id = '...'`，等号后
+            # 允许空白；取第一个引号外的非空白 token 作为 ID。
+            $m = [regex]::Match($text, '^\s*id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            if (-not $m.Success) { return "" }
+            return $m.Groups[1].Value.Trim()
+          }
+
+          function Test-ConfigContains([string]$path, [string]$needle) {
+            if (-not (Test-Path -LiteralPath $path)) { return $false }
+            $t = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            return (-not [string]::IsNullOrEmpty($t)) -and $t.Contains($needle)
           }
 
           try {
@@ -455,51 +487,76 @@ jobs:
             Run-Install $exe
             Write-Host "首次安装完成: $installed"
 
-            # 2) 设置测试 ID，并确认服务侧读回的 ID 就是它
-            $testId = "vegaci" + (Get-Random -Minimum 100000 -Maximum 999999)
-            $setIdOut = (& $installed --set-id $testId 2>&1 | Out-String).Trim()
-            Write-Host "set-id output: $setIdOut"
-            $idDeadline = (Get-Date).AddSeconds(60)
-            try { $id = Get-VegaId $installed } catch { throw "设置测试 ID 失败: $_" }
-            while ($id -ne $testId) {
-              if ((Get-Date) -ge $idDeadline) { break }
-              Start-Sleep 2
-              try { $id = Get-VegaId $installed } catch { throw "设置测试 ID 失败: $_" }
+            # 2) 找服务侧配置：两个服务账户 profile 下任一个存在的 Vega.toml
+            $cfgFile = Find-VegaToml $cfgCandidates 60
+            if ($null -eq $cfgFile) {
+              Write-Host "=== 诊断: 服务 profile 下没有找到 Vega.toml ==="
+              foreach ($d in ($cfgCandidates + $userCfgDir)) {
+                Write-Host "--- $d ---"
+                Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue |
+                  ForEach-Object { Write-Host ("  {0} {1} {2}" -f $_.Mode, $_.Length, $_.Name) }
+              }
+              throw "60 秒内没有在服务 profile 下找到 Vega.toml"
             }
-            Write-Host "设置后 ID=$id"
-            if ($id -ne $testId) { throw "设置测试 ID 失败" }
+            $cfgDir = Split-Path -Parent $cfgFile
+            $cfgMain = Join-Path $cfgDir "Vega.toml"
+            $cfgOpts = Join-Path $cfgDir "Vega2.toml"
+            Write-Host "服务配置目录: $cfgDir"
 
-            # 3) 写入标记选项并读回（src/core_main.rs：--option KEY VALUE 写，--option KEY 读）
+            $id1 = Get-ConfigId $cfgMain
+            if ([string]::IsNullOrEmpty($id1)) { throw "Vega.toml 里没有解析到设备 ID: $cfgMain" }
+            Write-Host "首次安装 ID=$id1"
+
+            # 3) 标记选项：写入后只认服务写盘的 Vega2.toml 含该标记，不读本地缓存
             $marker = [guid]::NewGuid().ToString("N")
             $setMarkerOut = (& $installed --option vega-ci-marker $marker 2>&1 | Out-String).Trim()
             Write-Host "set option output: $setMarkerOut"
-            $readBack = ""
-            for ($i = 0; $i -lt 15; $i++) {
-              $readBack = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
-              Write-Host "读取 vega-ci-marker: '$readBack'"
-              if ($readBack -eq $marker) { break }
+            $markerDeadline = (Get-Date).AddSeconds(30)
+            while (-not (Test-ConfigContains $cfgOpts $marker)) {
+              if ((Get-Date) -ge $markerDeadline) { throw "标记未写入服务配置" }
               Start-Sleep 2
             }
-            if ($readBack -ne $marker) { throw "设置标记失败: vega-ci-marker='$readBack'" }
+            Write-Host "标记已由服务写入: $cfgOpts"
 
-            # 4) 覆盖安装（同一个安装程序再跑一次）
+            # 4) 覆盖安装证据：两次安装之间删掉安装目录里的一个非 exe/dll 文件，
+            #    覆盖安装必须把它重新写回来（否则说明安装器其实没跑成）。
+            $witness = Join-Path $installDir "LICENCE"
+            if (-not (Test-Path -LiteralPath $witness)) {
+              $pick = Get-ChildItem -LiteralPath $installDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -notin @(".exe", ".dll") } |
+                Select-Object -First 1
+              if ($null -eq $pick) { throw "安装目录里没有可用于验证覆盖安装的文件: $installDir" }
+              $witness = $pick.FullName
+            }
+            Write-Host "覆盖安装证据文件: $witness"
+            Remove-Item -LiteralPath $witness -Force
+            if (Test-Path -LiteralPath $witness) { throw "删除证据文件失败: $witness" }
+
+            # 5) 覆盖安装（同一个安装程序再跑一次）
             Run-Install $exe
             Write-Host "覆盖安装完成: $installed"
 
-            # 5) 覆盖安装后设备 ID 与标记选项都必须保留
-            try { $id2 = Get-VegaId $installed } catch { throw "覆盖安装后设备 ID 变了: $_" }
-            Write-Host "覆盖安装后 ID=$id2"
-            if ($id2 -ne $testId) { throw "覆盖安装后设备 ID 变了" }
-            $readBack2 = ""
-            for ($i = 0; $i -lt 15; $i++) {
-              $readBack2 = (& $installed --option vega-ci-marker 2>&1 | Out-String).Trim()
-              Write-Host "覆盖安装后读取 vega-ci-marker: '$readBack2'"
-              if ($readBack2 -eq $marker) { break }
+            $witnessDeadline = (Get-Date).AddSeconds(60)
+            while (-not (Test-Path -LiteralPath $witness)) {
+              if ((Get-Date) -ge $witnessDeadline) { throw "覆盖安装没有执行" }
               Start-Sleep 2
             }
-            if ($readBack2 -ne $marker) { throw "覆盖安装后设置丢失" }
+            Write-Host "覆盖安装已重新写入: $witness"
 
-            Write-Host "覆盖安装验证通过 ID=$testId"
+            # 6) 覆盖后：服务配置里的 ID 不变，标记仍在
+            $idDeadline = (Get-Date).AddSeconds(15)
+            $id2 = ""
+            while ([string]::IsNullOrEmpty($id2)) {
+              $id2 = Get-ConfigId $cfgMain
+              if (-not [string]::IsNullOrEmpty($id2)) { break }
+              if ((Get-Date) -ge $idDeadline) { break }
+              Start-Sleep 2
+            }
+            Write-Host "覆盖安装后 ID=$id2"
+            if ($id2 -ne $id1) { throw "覆盖安装后设备 ID 变了: $id1 -> $id2" }
+            if (-not (Test-ConfigContains $cfgOpts $marker)) { throw "覆盖安装后标记丢失: $cfgOpts" }
+
+            Write-Host "覆盖安装验证通过 ID=$id1"
           } finally {
             # runner 是一次性的，任务结束即销毁，这里不做卸载；只打印服务状态，便于排查失败。
             Write-Host "=== 诊断: 服务 $svc 状态 ==="
