@@ -51,8 +51,8 @@ pub fn fetch_manifest() -> ResultType<VegaManifest> {
     fetch_fallback()
 }
 
-/// 镜像客户端不复用 `crate::hbbs_http::create_http_client_with_url`：自建
-/// 客户端并 `.no_proxy()`，不读取系统代理，直连镜像；不跟随重定向；
+/// 镜像客户端不复用仓库 hbbs_http 的现成客户端：自建客户端并
+/// `.no_proxy()`，不读取系统代理，直连镜像；不跟随重定向；
 /// 10s 总超时、5s 连接超时。构建失败直接返回 Err，由 `fetch_manifest`
 /// 转去 GitHub 兜底。
 fn fetch_mirror() -> ResultType<VegaManifest> {
