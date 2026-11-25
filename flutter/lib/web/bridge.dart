@@ -1644,6 +1644,10 @@ class RustdeskImpl {
     throw UnimplementedError("installRunWithoutInstall");
   }
 
+  bool installTakeFailed({dynamic hint}) {
+    throw UnimplementedError("installTakeFailed");
+  }
+
   Future<void> installInstallMe(
       {required String options, required String path, dynamic hint}) {
     throw UnimplementedError("installInstallMe");

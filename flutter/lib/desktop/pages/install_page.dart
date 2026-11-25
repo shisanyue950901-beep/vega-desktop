@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -76,6 +77,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
   final RxBool showProgress = false.obs;
   final RxBool btnEnabled = true.obs;
   final RxBool cancelEnabled = true.obs;
+  Timer? _failTimer;
 
   // todo move to theme.
   final buttonStyle = OutlinedButton.styleFrom(
@@ -122,6 +124,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
 
   @override
   void dispose() {
+    _failTimer?.cancel();
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -347,6 +350,21 @@ class _InstallPageBodyState extends State<_InstallPageBody>
       if (desktopicon.value) args += ' desktopicon';
       if (printer.value) args += ' printer';
       bind.installInstallMe(options: args, path: installPath);
+      // Vega 修改：安装成功进程会退出；UAC 取消或失败时进程保留，
+      // 轮询失败标记，恢复按钮让用户可以再点安装。
+      _failTimer?.cancel();
+      _failTimer = Timer.periodic(const Duration(milliseconds: 500), (t) {
+        if (!mounted) {
+          t.cancel();
+          return;
+        }
+        if (bind.installTakeFailed()) {
+          t.cancel();
+          showProgress.value = false;
+          cancelEnabled.value = true;
+          btnEnabled.value = true;
+        }
+      });
     }
 
     btnEnabled.value = false;
