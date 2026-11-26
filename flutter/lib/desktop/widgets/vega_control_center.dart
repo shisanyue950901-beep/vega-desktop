@@ -679,7 +679,7 @@ class VegaControlCenterPreview extends StatelessWidget {
       direct: !relay,
       latencyMs: relay ? 48 : 12,
       fps: 60,
-      quality: relay ? '原生 4K · 中继受限' : '原生 4K',
+      quality: relay ? '4K · 中继受限' : '原生 4K',
       display: '显示器 1 / 2',
       audio: true,
       clipboard: true,

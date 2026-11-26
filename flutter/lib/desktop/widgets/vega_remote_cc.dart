@@ -130,7 +130,7 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
   String _qualityText(bool direct) {
     final label = _qualityLabel[_quality] ?? '自定义';
     if (_quality == kRemoteImageQualityBest && !direct) {
-      return '$label · 中继受限';
+      return '4K · 中继受限';
     }
     return label;
   }
