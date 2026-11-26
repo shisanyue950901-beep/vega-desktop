@@ -32,11 +32,6 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
   static const _kPinKey = 'vega-cc-pinned';
   Timer? _tick;
   String _quality = '';
-  // 已因中继自动降过一次画质的会话；降过后用户手动切回 4K 就不再干预。
-  // 按会话记，控制中心重建（如切换相对鼠标模式）也不会再降。
-  static final Set<String> _relayCappedSessions = {};
-  bool _capping = false;
-  bool get _relayCapped => _relayCappedSessions.contains(sid.toString());
 
   FFI get ffi => widget.ffi;
   SessionID get sid => ffi.sessionId;
@@ -66,9 +61,7 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     _loadQuality();
     // 延迟、帧率、开关状态来自会话，1 秒刷新一次足够。
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      _capForRelay();
-      setState(() {});
+      if (mounted) setState(() {});
     });
   }
 
@@ -134,36 +127,11 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     if (mounted) setState(() => _quality = next);
   }
 
-  // 走中继且当前是原生 4K：自动降到均衡（中继带宽撑不住 4K60），只做一次。
-  Future<void> _capForRelay() async {
-    if (_capping || _relayCapped || ffi.ffiModel.direct != false) return;
-    final s = sid; // await 之后组件可能已销毁，先取会话 ID。
-    _capping = true;
-    try {
-      // 以会话当前画质为准（原版工具栏、快捷键也会改它）。
-      final cur = await bind.sessionGetImageQuality(sessionId: s) ?? '';
-      if (cur != kRemoteImageQualityBest) {
-        if (mounted && cur != _quality) setState(() => _quality = cur);
-        return;
-      }
-      _relayCappedSessions.add(s.toString());
-      const q = kRemoteImageQualityBalanced;
-      await bind.sessionSetImageQuality(sessionId: s, value: q);
-      await bind.sessionSetCustomFps(sessionId: s, fps: _qualityFps[q]!);
-      if (mounted) setState(() => _quality = q);
-    } finally {
-      _capping = false;
-    }
-  }
-
   // 原生 4K 需要直连；走中继时带宽不够，画质会被自动压低，直接写明。
   String _qualityText(bool direct) {
     final label = _qualityLabel[_quality] ?? '自定义';
     if (_quality == kRemoteImageQualityBest && !direct) {
       return '4K · 中继受限';
-    }
-    if (_relayCapped && !direct && _quality == kRemoteImageQualityBalanced) {
-      return '均衡 · 中继自动';
     }
     return label;
   }

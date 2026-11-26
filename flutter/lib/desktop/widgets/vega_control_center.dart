@@ -160,10 +160,15 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // 感应区至少 200 宽，隐藏/显示两种状态共用，鼠标停在边缘不会反复闪。
     return MouseRegion(
+      opaque: false,
+      hitTestBehavior: HitTestBehavior.translucent,
       onEnter: (_) => _onEnter(),
       onExit: (_) => _onExit(),
-      child: AnimatedSwitcher(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 200, minHeight: 18),
+        child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
@@ -185,6 +190,7 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
             ? _Handle(key: const ValueKey('handle'), dark: dark)
             : KeyedSubtree(
                 key: const ValueKey('cc'), child: _content(dark)),
+        ),
       ),
     );
   }
