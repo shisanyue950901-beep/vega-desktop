@@ -551,6 +551,11 @@ class RustdeskImpl {
         () => js.context.callMethod('setByName', ['send_chat', text]));
   }
 
+  void sessionVegaWake(
+      {required UuidValue sessionId,
+      required String targetId,
+      dynamic hint}) {}
+
   Future<void> sessionPeerOption(
       {required UuidValue sessionId,
       required String name,
