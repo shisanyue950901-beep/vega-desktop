@@ -77,7 +77,18 @@ pub(super) fn start_listening() -> ResultType<()> {
 pub async fn discover() -> ResultType<()> {
     let sockets = send_query()?;
     let rx = spawn_wait_responses(sockets);
-    handle_received_peers(rx).await?;
+    // Vega: a discovery round needs a hard deadline; otherwise a LAN that keeps answering
+    // (or a socket thread that never closes) keeps this round alive forever. A timeout is
+    // not an error: whatever the handler already stored stays stored.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        handle_received_peers(rx),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_) => log::warn!("lan discover timed out after 15s, ending this round"),
+    }
 
     log::info!("discover ping done");
     Ok(())
@@ -92,17 +103,40 @@ pub async fn discover() -> ResultType<()> {
 pub fn send_wol(id: String) -> bool {
     let interfaces = default_net::get_interfaces();
     let mut sent = false;
-    for peer in &config::LanPeers::load().peers {
+    let mut packets = 0u32;
+    'peer: for peer in &config::LanPeers::load().peers {
         if peer.id == id {
-            for (_, mac) in peer.ip_mac.iter() {
+            for (ip, mac) in peer.ip_mac.iter() {
+                // Vega: the map key is the peer IP observed by discovery. The mask check
+                // below used to be removed; it is back because sending through an interface
+                // of another subnet broadcasts the magic packet into the wrong network and
+                // never reaches the target. An unparsable key is skipped entirely.
+                let peer_ip = match ip.parse::<Ipv4Addr>() {
+                    Ok(peer_ip) => peer_ip,
+                    Err(_) => continue,
+                };
                 if let Ok(mac_addr) = mac.parse() {
                     for interface in &interfaces {
                         for ipv4 in &interface.ipv4 {
-                            // remove below mask check to avoid unexpected bug
-                            // if (u32::from(ipv4.addr) & u32::from(ipv4.netmask)) == (u32::from(peer_ip) & u32::from(ipv4.netmask))
+                            if (u32::from(ipv4.addr) & u32::from(ipv4.netmask))
+                                != (u32::from(peer_ip) & u32::from(ipv4.netmask))
+                            {
+                                continue;
+                            }
+                            // Vega: at most 16 packets per target, so a table with many
+                            // addresses or interfaces cannot turn one request into a flood.
+                            if packets >= 16 {
+                                break 'peer;
+                            }
+                            packets += 1;
                             log::info!("Send wol to {mac_addr} of {}", ipv4.addr);
-                            allow_err!(wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))));
-                            sent = true;
+                            match wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))) {
+                                Ok(_) => sent = true,
+                                Err(err) => log::warn!(
+                                    "Send wol to {mac_addr} of {} failed: {err}",
+                                    ipv4.addr
+                                ),
+                            }
                         }
                     }
                 }
@@ -232,6 +266,7 @@ fn wait_response(
     timeout: Option<std::time::Duration>,
     tx: UnboundedSender<config::DiscoveryPeer>,
 ) -> ResultType<()> {
+    let started = Instant::now();
     let mut last_recv_time = Instant::now();
 
     let local_addr = socket.local_addr();
@@ -300,6 +335,11 @@ fn wait_response(
         if last_recv_time.elapsed().as_millis() > 3_000 {
             break;
         }
+        // Vega: same hard cap as discover(); a busy LAN that answers without pause must not
+        // keep this socket thread alive past one discovery round.
+        if started.elapsed().as_secs() >= 15 {
+            break;
+        }
     }
     Ok(())
 }
@@ -340,6 +380,11 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
                         }
                     }
                     peers.insert(0, peer);
+                    // Vega: cap the table after the merge/insert logic above has run, so a
+                    // chatty LAN segment cannot grow it without bound.
+                    if peers.len() > 256 {
+                        peers.truncate(256);
+                    }
                     if last_write_time.map(|t| t.elapsed().as_millis() > 300).unwrap_or(true)  {
                         config::LanPeers::store(&peers);
                         #[cfg(feature = "flutter")]
