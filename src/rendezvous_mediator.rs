@@ -339,6 +339,33 @@ impl RendezvousMediator {
                 allow_err!(super::lan::start_listening());
             });
         }
+        // Vega: keep this side's LAN table (device id -> MAC) fresh without any UI window
+        // being open, so a peer asking this machine to wake a device in its LAN
+        // (misc.vega_wake_lan_peer) is answered from data this process discovered itself.
+        // lan::discover() drives its own current-thread runtime, so it must not be polled
+        // inside a tokio worker: run it on the blocking pool, exactly like the UI entry
+        // points call it synchronously.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            // start_all() is the single entry of the mediator loop, but guard anyway so a
+            // second call cannot stack another discover timer.
+            static LAN_DISCOVER_STARTED: AtomicBool = AtomicBool::new(false);
+            const LAN_DISCOVER_FIRST_DELAY: f64 = 20.;
+            const LAN_DISCOVER_INTERVAL: f64 = 600.;
+            if !LAN_DISCOVER_STARTED.swap(true, Ordering::SeqCst) {
+                tokio::spawn(async move {
+                    sleep(LAN_DISCOVER_FIRST_DELAY).await;
+                    loop {
+                        match tokio::task::spawn_blocking(super::lan::discover).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(err)) => log::warn!("lan discover error: {err}"),
+                            Err(err) => log::warn!("lan discover join error: {err}"),
+                        }
+                        sleep(LAN_DISCOVER_INTERVAL).await;
+                    }
+                });
+            }
+        }
         scrap::codec::test_av1();
         *LAST_NOT_DEPLOYED_REGISTER.lock().await = None;
         loop {
