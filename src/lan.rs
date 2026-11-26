@@ -399,6 +399,11 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
         }
     }
 
+    // Vega: also bound what was loaded, so a table left oversized by an older build is
+    // shrunk on this save instead of staying above the limit until 256 new peers arrive.
+    if peers.len() > 256 {
+        peers.truncate(256);
+    }
     config::LanPeers::store(&peers);
     #[cfg(feature = "flutter")]
     crate::flutter_ffi::main_load_lan_peers();
