@@ -336,6 +336,13 @@ jobs:
           Remove-Item Env:VEGA_SHOT_ABOUT -ErrorAction SilentlyContinue
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
+          $env:VEGA_SHOT_NAV = "2"
+          $env:VEGA_SHOT_LOCK = "1"
+          try { Invoke-VegaShot "shot-lock.png" } catch { Write-Host "lock capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Remove-Item Env:VEGA_SHOT_LOCK -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
           # 打开系统「透明效果」，让亚克力有机会在 CI 上画出来。
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f | Out-Null
           foreach ($cc in @(@("1", "shot-cc.png"), @("2", "shot-cc-collapsed.png"))) {
