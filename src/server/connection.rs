@@ -2263,13 +2263,11 @@ impl Connection {
         self.port_forward_socket.is_some() || self.port_forward_mux.is_some()
     }
 
-    // Vega: a wake id is a device id as carried by the rendezvous servers, kept tight so a
-    // peer cannot push anything else into the LAN table lookup.
+    // Vega: a wake id is a device id as carried by the rendezvous servers. Reuse the shared
+    // untrusted-id rule instead of a local copy, and keep the length tighter, so a peer
+    // cannot push anything else into the LAN table lookup.
     fn is_valid_wake_lan_peer_id(id: &str) -> bool {
-        (1..=64).contains(&id.len())
-            && id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        id.len() <= 64 && crate::common::is_valid_untrusted_peer_id(id)
     }
 
     // Vega: send the magic packet through this machine's own LAN table (the MAC was learned
@@ -2277,8 +2275,13 @@ impl Connection {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     async fn wake_lan_peer(id: String) -> &'static str {
         match tokio::task::spawn_blocking(move || crate::lan::send_wol(id)).await {
-            Ok(true) => "ok",
-            _ => "unknown",
+            Ok(crate::lan::WolOutcome::Sent) => "ok",
+            Ok(crate::lan::WolOutcome::NotFound) => "unknown",
+            Ok(crate::lan::WolOutcome::NotSent) => "unsent",
+            Err(err) => {
+                log::warn!("vega wake lan peer task failed: {err}");
+                "unknown"
+            }
         }
     }
 
@@ -4142,8 +4145,12 @@ impl Connection {
                             }
                         };
                         match reply {
-                            "ok" | "unknown" => log::info!("vega wake lan peer: {reply}"),
-                            _ => log::debug!("vega wake lan peer: {reply}"),
+                            "ok" | "unknown" | "unsent" => {
+                                log::info!("vega wake lan peer: {reply}")
+                            }
+                            // Vega: "busy" and "invalid" are the peer's own doing and say
+                            // nothing a user needs in the log file.
+                            _ => log::trace!("vega wake lan peer: {reply}"),
                         }
                         let mut m = Misc::new();
                         m.set_vega_wake_result(reply.into());
@@ -5921,6 +5928,12 @@ impl Connection {
         self.authed_conn_id.as_ref().map(|id| id.conn_type())
     }
 
+    // Vega: these two misc variants are sent on the peer's own schedule, so repeats of an
+    // out-of-scope wake message must not fill the log file.
+    fn is_vega_wake_misc_family(message: &'static str) -> bool {
+        matches!(message, "misc.vega_wake_lan_peer" | "misc.vega_wake_result")
+    }
+
     async fn handle_authorized_scope_violation(&mut self, message: &'static str) -> bool {
         let conn_type = self
             .authed_conn_type()
@@ -5930,6 +5943,12 @@ impl Connection {
         if is_first {
             log::warn!(
                 "Received out-of-scope message in {} session: {}",
+                conn_type,
+                message
+            );
+        } else if Self::is_vega_wake_misc_family(message) {
+            log::trace!(
+                "Received repeated out-of-scope message in {} session: {}",
                 conn_type,
                 message
             );
