@@ -351,7 +351,8 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   }
 
   // CI 截图用：VEGA_SHOT_LOCK=1 时显示锁定提示（只在 GitHub Actions 里生效）。
-  static final bool _vegaShotLock = vegaShotEnv('VEGA_SHOT_LOCK') == '1';
+  static final bool _vegaShotLock =
+      !isWeb && vegaShotEnv('VEGA_SHOT_LOCK') == '1';
 
   Widget _vegaLockNotice(VegaPalette palette) {
     return Container(
