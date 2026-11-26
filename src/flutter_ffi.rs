@@ -715,6 +715,13 @@ pub fn session_send_chat(session_id: SessionID, text: String) {
     }
 }
 
+// Vega: ask the connected peer to wake a device in its own LAN.
+pub fn session_vega_wake(session_id: SessionID, target_id: String) {
+    if let Some(s) = sessions::get_session_by_session_id(&session_id) {
+        s.vega_wake(target_id);
+    }
+}
+
 // Terminal functions
 pub fn session_open_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
