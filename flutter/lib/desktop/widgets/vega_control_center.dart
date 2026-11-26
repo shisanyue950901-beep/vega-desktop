@@ -159,10 +159,19 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
         duration: const Duration(milliseconds: 220),
         switchInCurve: Curves.easeOut,
         switchOutCurve: Curves.easeIn,
+        layoutBuilder: (current, previous) => Stack(
+          alignment: Alignment.topCenter,
+          children: [...previous, if (current != null) current],
+        ),
         transitionBuilder: (child, anim) => FadeTransition(
           opacity: anim,
-          child: SizeTransition(
-              sizeFactor: anim, axisAlignment: -1, child: child),
+          // 不用 SizeTransition：它的 Align 会把整块推到左边。
+          child: SlideTransition(
+            position: Tween<Offset>(
+                    begin: const Offset(0, -0.25), end: Offset.zero)
+                .animate(anim),
+            child: child,
+          ),
         ),
         child: _hidden
             ? _Handle(key: const ValueKey('handle'), dark: dark)
