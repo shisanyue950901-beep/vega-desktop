@@ -2272,6 +2272,18 @@ impl<T: InvokeUiSession> Remote<T> {
                     Some(misc::Union::ChatMessage(c)) => {
                         self.handler.new_message(c.text);
                     }
+                    // Vega: the peer's answer to our Wake-on-LAN request. The peer sends
+                    // the magic packet inside its own LAN, so the result only tells us
+                    // whether it knew a matching device and sent it.
+                    Some(misc::Union::VegaWakeResult(r)) => {
+                        let text = match r.as_str() {
+                            "ok" => "开机信号已发出。目标电脑约 1 分钟内上线；没上线请检查网线和 BIOS 网络唤醒设置。",
+                            "unknown" => "这台电脑没在局域网里找到目标设备。请确认两台在同一局域网，且目标开着时这台电脑上的 Vega 已运行过一阵（用于记录其网卡地址）。",
+                            "busy" => "操作太频繁，请 5 秒后再试。",
+                            _ => "对方拒绝了这个请求（需要普通远程控制会话）。",
+                        };
+                        self.handler.msgbox("custom-nocancel", "远程开机", text, "");
+                    }
                     Some(misc::Union::PermissionInfo(p)) => {
                         log::info!("Change permission {:?} -> {}", p.permission, p.enabled);
                         // https://github.com/rustdesk/rustdesk/issues/3703#issuecomment-1474734754
