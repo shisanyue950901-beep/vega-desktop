@@ -3,6 +3,7 @@
 //
 // 组件只负责界面和动画；状态与回调由远程窗口传入。
 
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -70,16 +71,22 @@ class VegaCcActions {
 }
 
 /// 收起时是顶部小条，点击展开成毛玻璃面板。
+/// 未固定时：鼠标离开 2.5 秒后缩成顶部一条细线，鼠标移到细线处再出现。
+/// 面板里的图钉可固定常显。
 class VegaControlCenter extends StatefulWidget {
   final VegaCcState state;
   final VegaCcActions actions;
   final bool initiallyExpanded;
+  final bool pinned;
+  final ValueChanged<bool>? onPinChanged;
 
   const VegaControlCenter({
     Key? key,
     required this.state,
     this.actions = const VegaCcActions(),
     this.initiallyExpanded = false,
+    this.pinned = false,
+    this.onPinChanged,
   }) : super(key: key);
 
   @override
@@ -87,11 +94,85 @@ class VegaControlCenter extends StatefulWidget {
 }
 
 class _VegaControlCenterState extends State<VegaControlCenter> {
+  static const _hideDelay = Duration(milliseconds: 2500);
   late bool _expanded = widget.initiallyExpanded;
+  late bool _pinned = widget.pinned;
+  bool _hovering = false;
+  bool _hidden = false;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleHide(); // 刚连上时先露出 2.5 秒，让用户知道它在这里。
+  }
+
+  @override
+  void didUpdateWidget(VegaControlCenter old) {
+    super.didUpdateWidget(old);
+    if (old.pinned != widget.pinned) {
+      _pinned = widget.pinned;
+      _scheduleHide();
+    }
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    if (_pinned || _expanded || _hovering) return;
+    _hideTimer = Timer(_hideDelay, () {
+      if (mounted && !_pinned && !_expanded && !_hovering) {
+        setState(() => _hidden = true);
+      }
+    });
+  }
+
+  void _onEnter() {
+    _hovering = true;
+    _hideTimer?.cancel();
+    if (_hidden) setState(() => _hidden = false);
+  }
+
+  void _onExit() {
+    _hovering = false;
+    _scheduleHide();
+  }
+
+  void _togglePin() {
+    setState(() => _pinned = !_pinned);
+    widget.onPinChanged?.call(_pinned);
+    _scheduleHide();
+  }
 
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    return MouseRegion(
+      onEnter: (_) => _onEnter(),
+      onExit: (_) => _onExit(),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        transitionBuilder: (child, anim) => FadeTransition(
+          opacity: anim,
+          child: SizeTransition(
+              sizeFactor: anim, axisAlignment: -1, child: child),
+        ),
+        child: _hidden
+            ? _Handle(key: const ValueKey('handle'), dark: dark)
+            : KeyedSubtree(
+                key: const ValueKey('cc'), child: _content(dark)),
+      ),
+    );
+  }
+
+  Widget _content(bool dark) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -99,7 +180,10 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
           state: widget.state,
           expanded: _expanded,
           dark: dark,
-          onTap: () => setState(() => _expanded = !_expanded),
+          onTap: () {
+            setState(() => _expanded = !_expanded);
+            _scheduleHide();
+          },
         ),
         const SizedBox(height: 8),
         AnimatedSwitcher(
@@ -121,6 +205,8 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
                   state: widget.state,
                   actions: widget.actions,
                   dark: dark,
+                  pinned: _pinned,
+                  onPin: _togglePin,
                 )
               : const SizedBox.shrink(key: ValueKey('none')),
         ),
@@ -235,16 +321,49 @@ class _Pill extends StatelessWidget {
   }
 }
 
+/// 隐藏时留在顶部的细线，鼠标移上去整个控制中心就回来。
+class _Handle extends StatelessWidget {
+  final bool dark;
+
+  const _Handle({Key? key, required this.dark}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // 外层透明区域放大鼠标感应范围，细线本身只占很小一块。
+    return Container(
+      width: 200,
+      height: 18,
+      color: Colors.transparent,
+      alignment: Alignment.topCenter,
+      child: Container(
+        width: 56,
+        height: 5,
+        decoration: BoxDecoration(
+          color: (dark ? Colors.white : Colors.black).withOpacity(0.35),
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(
+              color: (dark ? Colors.black : Colors.white).withOpacity(0.5),
+              width: 0.5),
+        ),
+      ),
+    );
+  }
+}
+
 class _Panel extends StatelessWidget {
   final VegaCcState state;
   final VegaCcActions actions;
   final bool dark;
+  final bool pinned;
+  final VoidCallback? onPin;
 
   const _Panel({
     Key? key,
     required this.state,
     required this.actions,
     required this.dark,
+    this.pinned = false,
+    this.onPin,
   }) : super(key: key);
 
   @override
@@ -456,6 +575,20 @@ class _Panel extends StatelessWidget {
         chip('${state.latencyMs} ms', _sub(dark)),
         const SizedBox(width: 6),
         chip('${state.fps} 帧', _sub(dark)),
+        const SizedBox(width: 4),
+        Tooltip(
+          message: pinned ? '取消固定（不用时自动隐藏）' : '固定显示',
+          child: _Pressable(
+            onTap: onPin,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(
+                  pinned ? Icons.push_pin_rounded : Icons.push_pin_outlined,
+                  size: 17,
+                  color: pinned ? VegaColors.auroraStart : _sub(dark)),
+            ),
+          ),
+        ),
       ],
     );
   }

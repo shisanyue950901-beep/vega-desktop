@@ -29,6 +29,7 @@ class VegaRemoteCc extends StatefulWidget {
 }
 
 class _VegaRemoteCcState extends State<VegaRemoteCc> {
+  static const _kPinKey = 'vega-cc-pinned';
   Timer? _tick;
   String _quality = '';
 
@@ -258,6 +259,10 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     );
     return VegaControlCenter(
       state: state,
+      // 默认不用时自动隐藏；面板里的图钉可固定常显，记在本机设置里。
+      pinned: bind.mainGetLocalOption(key: _kPinKey) == 'Y',
+      onPinChanged: (v) =>
+          bind.mainSetLocalOption(key: _kPinKey, value: v ? 'Y' : 'N'),
       actions: VegaCcActions(
         onQuality: _nextQuality,
         onDisplay: n > 1 ? _nextDisplay : null,
