@@ -49,6 +49,8 @@ class VegaCcActions {
   final VoidCallback? onRestart;
   final VoidCallback? onScreenshot;
   final VoidCallback? onDisconnect;
+  // 让对端（代理）给它局域网里的其他设备发开机信号。
+  final VoidCallback? onWake;
   // 打开原版完整工具栏（键盘模式、多显示器等暂未搬进控制中心的功能）。
   final VoidCallback? onMore;
 
@@ -62,6 +64,7 @@ class VegaCcActions {
     this.onRestart,
     this.onScreenshot,
     this.onDisconnect,
+    this.onWake,
     this.onMore,
   });
 }
@@ -343,28 +346,65 @@ class _Panel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            _Pressable(
-              onTap: actions.onDisconnect,
-              child: Container(
-                height: 40,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF453A),
-                  borderRadius: BorderRadius.circular(14),
+            Row(
+              children: [
+                if (actions.onWake != null) ...[
+                  Expanded(
+                    child: _Pressable(
+                      onTap: actions.onWake,
+                      child: Container(
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: dark
+                              ? Colors.white.withOpacity(0.08)
+                              : Colors.white.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.power_settings_new_rounded,
+                                size: 16, color: _fg(dark)),
+                            const SizedBox(width: 6),
+                            Text('远程开机',
+                                style: TextStyle(
+                                    color: _fg(dark),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: _Pressable(
+                    onTap: actions.onDisconnect,
+                    child: Container(
+                      height: 40,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF453A),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.link_off_rounded, size: 16, color: Colors.white),
+                          SizedBox(width: 6),
+                          Text('断开连接',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.link_off_rounded, size: 16, color: Colors.white),
-                    SizedBox(width: 6),
-                    Text('断开连接',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
+              ],
             ),
           ],
         ),
@@ -657,6 +697,7 @@ class VegaControlCenterPreview extends StatelessWidget {
               child: VegaControlCenter(
                 state: state,
                 initiallyExpanded: expanded,
+                actions: VegaCcActions(onWake: () {}, onMore: () {}),
               ),
             ),
           ),

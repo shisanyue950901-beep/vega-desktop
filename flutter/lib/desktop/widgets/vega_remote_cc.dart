@@ -3,6 +3,7 @@
 // 能复用上游的就复用上游菜单项（Ctrl+Alt+Del、锁屏、重启、截图、隐私黑屏），
 // 保证权限判断和对端版本兼容与原工具栏一致。
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
@@ -126,6 +127,95 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     setState(() {});
   }
 
+  // 远程开机：让当前连着的这台电脑（代理）给同一局域网里的目标设备发开机信号。
+  // 代理按自己记录的局域网设备 MAC 发送，结果由对端回传后弹窗显示。
+  Future<void> _wake() async {
+    List<Map<String, dynamic>> peers = [];
+    try {
+      final raw = await bind.mainLoadRecentPeersForAb(filter: '');
+      if (raw.isNotEmpty) {
+        peers = (jsonDecode(raw) as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .where((e) => (e['id'] ?? '') != widget.id)
+            .toList();
+      }
+    } catch (_) {}
+    final ctrl = TextEditingController();
+    final valid = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+    ffi.dialogManager.show((setState, close, context) {
+      void send(String id) {
+        id = id.replaceAll(' ', '').trim();
+        if (!valid.hasMatch(id)) return;
+        bind.sessionVegaWake(sessionId: sid, targetId: id);
+        close();
+        showToast('已让这台电脑发送开机信号');
+      }
+
+      String label(Map<String, dynamic> p) {
+        final a = (p['alias'] ?? '').toString();
+        final h = (p['hostname'] ?? '').toString();
+        return a.isNotEmpty ? a : (h.isNotEmpty ? h : p['id'].toString());
+      }
+
+      return CustomAlertDialog(
+        title: const Text('远程开机'),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '由当前连接的电脑代发开机信号。目标电脑需要和它在同一局域网、插网线，并在 BIOS 里打开网络唤醒。',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.5,
+                    color: Theme.of(context).hintColor),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                    labelText: '目标设备 ID', isDense: true),
+                onSubmitted: send,
+              ),
+              if (peers.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: peers
+                        .map((p) => ListTile(
+                              dense: true,
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              leading: const Icon(
+                                  Icons.desktop_windows_outlined,
+                                  size: 18),
+                              title: Text(label(p),
+                                  overflow: TextOverflow.ellipsis),
+                              subtitle: Text(p['id'].toString()),
+                              onTap: () => send(p['id'].toString()),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          dialogButton('取消', onPressed: close, isOutline: true),
+          dialogButton('发送', onPressed: () => send(ctrl.text)),
+        ],
+        onSubmit: () => send(ctrl.text),
+        onCancel: close,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final model = ffi.ffiModel;
@@ -160,6 +250,7 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
         onRestart: _upstream(kShortcutActionRestartRemote),
         onScreenshot: _upstream(kShortcutActionScreenshot),
         onDisconnect: () => closeConnection(id: widget.id),
+        onWake: _wake,
         onMore: widget.onMore,
       ),
     );
