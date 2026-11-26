@@ -792,6 +792,15 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg_out));
     }
 
+    // Ask the connected peer to send Wake-on-LAN to a device in its own LAN.
+    pub fn vega_wake(&self, target_id: String) {
+        let mut misc = Misc::new();
+        misc.set_vega_wake_lan_peer(target_id);
+        let mut msg = Message::new();
+        msg.set_misc(misc);
+        self.send(Data::Message(msg));
+    }
+
     // Terminal methods
     pub fn open_terminal(&self, terminal_id: i32, rows: u32, cols: u32) {
         let mut action = TerminalAction::new();
