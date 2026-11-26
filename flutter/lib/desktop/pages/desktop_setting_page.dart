@@ -198,10 +198,6 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Vega：切到「关于」时解除鼠标锁，保证被控时也能点检查更新。
-    ever<SettingsTabKey>(selectedTab, (t) {
-      if (t == SettingsTabKey.about) _block.value = false;
-    });
     _videoConnTimer =
         periodic_immediate(Duration(milliseconds: 1000), () async {
       if (!mounted) {
@@ -294,13 +290,11 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   }
 
   Widget _buildBlock({required List<Widget> children}) {
-    // Vega：嵌入主界面时，锁定只作用于内容区（见 _vegaBlockedContent），
-    // 标题和分组标签始终可点；「关于」页不锁，被控时也能检查更新。
-    if (widget.vegaEmbedded) return Row(children: children);
     // check both mouseMoveTime and videoConnCount
     return Obx(() {
       final videoConnBlock =
-          _canBeBlocked.value && stateGlobal.videoConnCount > 0;
+          (_canBeBlocked.value && stateGlobal.videoConnCount > 0) ||
+              _vegaShotLock;
       return Stack(children: [
         buildRemoteBlock(
           block: _block,
@@ -312,9 +306,12 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
           ),
         ),
         if (videoConnBlock)
-          Container(
-            color: Colors.black.withOpacity(0.5),
-          )
+          // Vega：上游是 50% 黑色遮罩，嵌入主界面时换成提示卡（锁定逻辑不变）。
+          widget.vegaEmbedded
+              ? Positioned.fill(child: _vegaLockNotice(VegaColors.of(context)))
+              : Container(
+                  color: Colors.black.withOpacity(0.5),
+                )
       ]);
     });
   }
@@ -356,35 +353,12 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
   // CI 截图用：VEGA_SHOT_LOCK=1 时显示锁定提示（只在 GitHub Actions 里生效）。
   static final bool _vegaShotLock = vegaShotEnv('VEGA_SHOT_LOCK') == '1';
 
-  bool get _vegaOnAbout => selectedTab.value == SettingsTabKey.about;
-
-  /// Vega：被远程控制时锁定设置内容（上游安全机制，防止控制端改设置），
-  /// 但「关于」页除外：只含检查更新（仅装签名过的新版本）和链接。
-  /// 树结构始终不变，避免 PageView 重建后跳回第一页。
-  Widget _vegaBlockedContent(VegaPalette palette, Widget page) {
-    return Obx(() {
-      final onAbout = _vegaOnAbout;
-      final videoConnBlock = !onAbout &&
-          ((_canBeBlocked.value && stateGlobal.videoConnCount > 0) ||
-              _vegaShotLock);
-      return Stack(children: [
-        buildRemoteBlock(
-          block: _block,
-          mask: false,
-          use: () async => !_vegaOnAbout && await canBeBlocked(),
-          child: preventMouseKeyBuilder(child: page, block: videoConnBlock),
-        ),
-        if (videoConnBlock) Positioned.fill(child: _vegaLockNotice(palette)),
-      ]);
-    });
-  }
-
   Widget _vegaLockNotice(VegaPalette palette) {
     return Container(
       color: palette.bg.withOpacity(0.72),
       alignment: Alignment.center,
       child: Container(
-        width: 320,
+        width: 340,
         padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
         decoration: BoxDecoration(
           color: palette.card,
@@ -408,7 +382,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
                     fontWeight: FontWeight.w700,
                     color: palette.text)),
             const SizedBox(height: 6),
-            Text('为了安全，设置暂时锁定，断开后自动恢复。\n检查更新请到「关于」。',
+            Text('为了安全，设置和检查更新暂时锁定，断开后自动恢复。\n如需远程操作，请在本机「安全」里打开「允许远程修改配置」。',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 12.5, height: 1.5, color: palette.secondary)),
@@ -443,13 +417,10 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
           Divider(height: 1, thickness: 1, color: palette.separator)
               .marginSymmetric(horizontal: 28),
           Expanded(
-            child: _vegaBlockedContent(
-              palette,
-              PageView(
-                controller: controller,
-                physics: const NeverScrollableScrollPhysics(),
-                children: _children(),
-              ),
+            child: PageView(
+              controller: controller,
+              physics: const NeverScrollableScrollPhysics(),
+              children: _children(),
             ),
           ),
         ],
