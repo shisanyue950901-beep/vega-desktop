@@ -130,10 +130,6 @@ Future<void> main(List<String> args) async {
       });
       return;
     }
-    if (vegaShotEnv('VEGA_SHOT_CM') == '1') {
-      await _vegaShotCm();
-      return;
-    }
     runMainApp(true);
   }
 }
@@ -303,37 +299,6 @@ void runMultiWindow(
   WindowController.fromWindowId(kWindowId!).show();
 }
 
-// Vega：CI 截图用。VEGA_SHOT_CM=1 时主程序直接渲染被控端连接小窗，并塞一个假的已授权连接。
-// 不走 --cm（那条路依赖服务端 IPC，CI 里会退出）。
-Future<void> _vegaShotCm() async {
-  await initEnv(kAppTypeMain);
-  desktopType = DesktopType.cm;
-  // 先把假连接放进模型和标签页，再起界面，避免依赖窗口回调时序。
-  gFFI.serverModel.addConnection({
-    'client': jsonEncode({
-      'id': 1, 'authorized': true, 'is_file_transfer': false,
-      'is_view_camera': false, 'is_terminal': false, 'port_forward': '',
-      'name': 'Caps-PC', 'avatar': '', 'peer_id': '123456789',
-      'keyboard': true, 'clipboard': true, 'audio': true, 'file': true,
-      'restart': true, 'recording': false, 'block_input': false,
-      'privacy_mode': false, 'disconnected': false, 'from_switch': false,
-      'in_voice_call': false, 'incoming_voice_call': false,
-    })
-  });
-  gFFI.serverModel.cmHiddenTimer?.cancel();
-  gFFI.serverModel.cmHiddenTimer = null;
-  _runApp('', const DesktopServerPage(), MyTheme.currentThemeMode());
-  // 不调 showCmWindow：它会 mainHideDock（工具窗口），CI 按主窗口句柄截图会找不到。
-  windowManager.waitUntilReadyToShow(
-      getHiddenTitleBarWindowOptions(
-          size: kConnectionManagerWindowSizeClosedChat),
-      () async {
-    await windowManager.show();
-    await windowManager.focus();
-    await windowManager.setOpacity(1);
-  });
-  setResizable(false);
-}
 
 void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);

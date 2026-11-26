@@ -1,4 +1,3 @@
-import '../vega_shot.dart';
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
@@ -28,7 +27,6 @@ const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
 
 // Vega：CI 截图用的被控端小窗假连接模式，不与 Rust 侧同步连接列表。
-final bool vegaShotCm = vegaShotEnv('VEGA_SHOT_CM') == '1';
 
 class ServerModel with ChangeNotifier {
   bool _isStart = false; // Android MainService status
@@ -163,7 +161,7 @@ class ServerModel with ChangeNotifier {
         notifyListeners();
       }
 
-      if (desktopType == DesktopType.cm && !vegaShotCm) {
+      if (desktopType == DesktopType.cm) {
         final res = await bind.cmCheckClientsLength(length: _clients.length);
         if (res != null) {
           debugPrint("clients not match!");
@@ -501,7 +499,7 @@ class ServerModel with ChangeNotifier {
 
   // force
   updateClientState([String? json]) async {
-    if (isTest || vegaShotCm) return;
+    if (isTest) return;
     var res = await bind.cmGetClientsState();
     List<dynamic> clientsJson;
     try {

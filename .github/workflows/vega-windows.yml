@@ -338,9 +338,6 @@ jobs:
           Start-Sleep 2
           # 打开系统「透明效果」，让亚克力有机会在 CI 上画出来。
           reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f | Out-Null
-          $env:VEGA_SHOT_CM = "1"
-          try { Invoke-VegaShot "shot-cm.png" } catch { Write-Host "cm capture failed: $_" }
-          Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
           foreach ($cc in @(@("1", "shot-cc.png"), @("2", "shot-cc-collapsed.png"))) {
             Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
             Start-Sleep 2
@@ -354,9 +351,6 @@ jobs:
           try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
-          $env:VEGA_SHOT_CM = "1"
-          try { Invoke-VegaShot "shot-cm-dark.png" } catch { Write-Host "cm dark capture failed: $_" }
-          Remove-Item Env:VEGA_SHOT_CM -ErrorAction SilentlyContinue
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           $env:VEGA_SHOT_CC = "1"
