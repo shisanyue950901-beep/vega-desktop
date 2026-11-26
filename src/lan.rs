@@ -97,9 +97,9 @@ pub async fn discover() -> ResultType<()> {
 /// Sends a Wake-on-LAN magic packet to the LAN peer with `id`, using the MAC addresses
 /// remembered by this side's LAN discovery.
 ///
-/// Returns true only when such a peer is known and at least one packet was attempted,
-/// so a caller (e.g. a remote peer asking this machine to wake a device in its LAN) can
-/// tell "not in my LAN table" from "sent".
+/// Returns true only when such a peer is known and at least one packet was sent
+/// successfully, so a caller (e.g. a remote peer asking this machine to wake a device in
+/// its LAN) can tell "not sent" from "sent".
 pub fn send_wol(id: String) -> bool {
     let interfaces = default_net::get_interfaces();
     let mut sent = false;
