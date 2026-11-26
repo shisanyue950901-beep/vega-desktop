@@ -162,8 +162,9 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // 感应区至少 200 宽，隐藏/显示两种状态共用，鼠标停在边缘不会反复闪。
     return MouseRegion(
-      opaque: false,
-      hitTestBehavior: HitTestBehavior.translucent,
+      // 不穿透：控制中心上的点击不能同时发给远程画面。代价是细线两侧
+      // 200x18 的小块不传给远端。
+      hitTestBehavior: HitTestBehavior.opaque,
       onEnter: (_) => _onEnter(),
       onExit: (_) => _onExit(),
       child: ConstrainedBox(
