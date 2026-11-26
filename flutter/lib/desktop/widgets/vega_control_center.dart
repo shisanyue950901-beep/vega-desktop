@@ -112,6 +112,7 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
     super.didUpdateWidget(old);
     if (old.pinned != widget.pinned) {
       _pinned = widget.pinned;
+      if (_pinned && _hidden) setState(() => _hidden = false);
       _scheduleHide();
     }
   }
@@ -124,10 +125,14 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
 
   void _scheduleHide() {
     _hideTimer?.cancel();
-    if (_pinned || _expanded || _hovering) return;
+    // 展开的面板也一样：鼠标离开 2.5 秒后收起并缩成细线。
+    if (_pinned || _hovering) return;
     _hideTimer = Timer(_hideDelay, () {
-      if (mounted && !_pinned && !_expanded && !_hovering) {
-        setState(() => _hidden = true);
+      if (mounted && !_pinned && !_hovering) {
+        setState(() {
+          _expanded = false;
+          _hidden = true;
+        });
       }
     });
   }
@@ -144,7 +149,10 @@ class _VegaControlCenterState extends State<VegaControlCenter> {
   }
 
   void _togglePin() {
-    setState(() => _pinned = !_pinned);
+    setState(() {
+      _pinned = !_pinned;
+      if (_pinned) _hidden = false;
+    });
     widget.onPinChanged?.call(_pinned);
     _scheduleHide();
   }
@@ -841,6 +849,8 @@ class VegaControlCenterPreview extends StatelessWidget {
               child: VegaControlCenter(
                 state: state,
                 initiallyExpanded: expanded,
+                // 展开预览固定住，避免截图前自动收起；收起预览用来拍细线。
+                pinned: expanded,
                 actions: VegaCcActions(onWake: () {}, onMore: () {}),
               ),
             ),
