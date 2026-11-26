@@ -2249,7 +2249,7 @@ pub fn main_get_mouse_time() -> f64 {
 pub fn main_wol(id: String) {
     // TODO: move send_wol outside.
     #[cfg(not(any(target_os = "ios")))]
-    crate::lan::send_wol(id)
+    let _ = crate::lan::send_wol(id);
 }
 
 pub fn main_create_shortcut(_id: String) {
