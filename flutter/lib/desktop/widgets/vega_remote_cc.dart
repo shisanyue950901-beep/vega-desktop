@@ -40,10 +40,17 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     kRemoteImageQualityBalanced,
     kRemoteImageQualityLow,
   ];
+  // 三档画质：流畅（低画质高帧率）/ 均衡 / 原生 4K（原分辨率、最佳画质、60 帧，
+  // 走硬件编码，不开 4:4:4，因为上游 4:4:4 只支持软件 AV1/VP9）。
   static const _qualityLabel = {
-    kRemoteImageQualityBest: '最佳画质',
+    kRemoteImageQualityBest: '原生 4K',
     kRemoteImageQualityBalanced: '均衡',
-    kRemoteImageQualityLow: '流畅优先',
+    kRemoteImageQualityLow: '流畅',
+  };
+  static const _qualityFps = {
+    kRemoteImageQualityBest: 60,
+    kRemoteImageQualityBalanced: 30,
+    kRemoteImageQualityLow: 60,
   };
 
   @override
@@ -115,7 +122,17 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     final i = _qualities.indexOf(_quality);
     final next = _qualities[(i + 1) % _qualities.length];
     await bind.sessionSetImageQuality(sessionId: sid, value: next);
+    await bind.sessionSetCustomFps(sessionId: sid, fps: _qualityFps[next]!);
     if (mounted) setState(() => _quality = next);
+  }
+
+  // 原生 4K 需要直连；走中继时带宽不够，画质会被自动压低，直接写明。
+  String _qualityText(bool direct) {
+    final label = _qualityLabel[_quality] ?? '自定义';
+    if (_quality == kRemoteImageQualityBest && !direct) {
+      return '$label · 中继受限';
+    }
+    return label;
   }
 
   void _nextDisplay() {
@@ -231,7 +248,7 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
       direct: model.direct == true,
       latencyMs: _num(q.delay),
       fps: _num(q.fps),
-      quality: _qualityLabel[_quality] ?? '自定义',
+      quality: _qualityText(model.direct == true),
       display: n > 1 ? '显示器 $cur / $n' : '显示器 1',
       audio: !_opt('disable-audio'),
       clipboard: !_opt('disable-clipboard'),

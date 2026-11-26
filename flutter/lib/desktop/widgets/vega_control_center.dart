@@ -15,7 +15,7 @@ class VegaCcState {
   final bool direct; // 直连 / 中继
   final int latencyMs;
   final int fps;
-  final String quality; // 例如「最佳画质」
+  final String quality; // 例如「原生 4K」
   final String display; // 例如「显示器 1 / 2」
   final bool audio;
   final bool clipboard;
@@ -672,12 +672,14 @@ class VegaControlCenterPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const state = VegaCcState(
+    // 浅色截图演示直连原生 4K；深色截图演示走中继时的提示。
+    final relay = Theme.of(context).brightness == Brightness.dark;
+    final state = VegaCcState(
       peerName: 'Caps-PC',
-      direct: true,
-      latencyMs: 12,
+      direct: !relay,
+      latencyMs: relay ? 48 : 12,
       fps: 60,
-      quality: '最佳画质',
+      quality: relay ? '原生 4K · 中继受限' : '原生 4K',
       display: '显示器 1 / 2',
       audio: true,
       clipboard: true,
