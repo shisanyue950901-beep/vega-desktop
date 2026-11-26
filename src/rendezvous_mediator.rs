@@ -350,8 +350,8 @@ impl RendezvousMediator {
             // start_all() is the single entry of the mediator loop, but guard anyway so a
             // second call cannot stack another discover timer.
             static LAN_DISCOVER_STARTED: AtomicBool = AtomicBool::new(false);
-            const LAN_DISCOVER_FIRST_DELAY: f64 = 20.;
-            const LAN_DISCOVER_INTERVAL: f64 = 600.;
+            const LAN_DISCOVER_FIRST_DELAY: f32 = 20.;
+            const LAN_DISCOVER_INTERVAL: f32 = 600.;
             if !LAN_DISCOVER_STARTED.swap(true, Ordering::SeqCst) {
                 tokio::spawn(async move {
                     sleep(LAN_DISCOVER_FIRST_DELAY).await;
