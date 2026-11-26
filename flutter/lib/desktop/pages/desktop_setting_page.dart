@@ -359,7 +359,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
       color: palette.bg.withOpacity(0.72),
       alignment: Alignment.center,
       child: Container(
-        width: 340,
+        width: 360,
         padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
         decoration: BoxDecoration(
           color: palette.card,
@@ -383,7 +383,7 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
                     fontWeight: FontWeight.w700,
                     color: palette.text)),
             const SizedBox(height: 6),
-            Text('为了安全，设置和检查更新暂时锁定，断开后自动恢复。\n如需远程操作，请在本机「安全」里打开「允许远程修改配置」。',
+            Text('设置和检查更新已暂时锁定，断开后自动恢复。\n如需远程操作，请在本机「安全」里\n开启「允许远程修改配置」。',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 12.5, height: 1.5, color: palette.secondary)),
