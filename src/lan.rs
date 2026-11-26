@@ -83,8 +83,15 @@ pub async fn discover() -> ResultType<()> {
     Ok(())
 }
 
-pub fn send_wol(id: String) {
+/// Sends a Wake-on-LAN magic packet to the LAN peer with `id`, using the MAC addresses
+/// remembered by this side's LAN discovery.
+///
+/// Returns true only when such a peer is known and at least one packet was attempted,
+/// so a caller (e.g. a remote peer asking this machine to wake a device in its LAN) can
+/// tell "not in my LAN table" from "sent".
+pub fn send_wol(id: String) -> bool {
     let interfaces = default_net::get_interfaces();
+    let mut sent = false;
     for peer in &config::LanPeers::load().peers {
         if peer.id == id {
             for (_, mac) in peer.ip_mac.iter() {
@@ -95,6 +102,7 @@ pub fn send_wol(id: String) {
                             // if (u32::from(ipv4.addr) & u32::from(ipv4.netmask)) == (u32::from(peer_ip) & u32::from(ipv4.netmask))
                             log::info!("Send wol to {mac_addr} of {}", ipv4.addr);
                             allow_err!(wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))));
+                            sent = true;
                         }
                     }
                 }
@@ -102,6 +110,7 @@ pub fn send_wol(id: String) {
             break;
         }
     }
+    sent
 }
 
 #[inline]
