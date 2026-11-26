@@ -6,6 +6,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/vega_changelog.dart';
 import 'package:flutter_hbb/vega_theme.dart';
 
 class VegaUpdateTile extends StatefulWidget {
@@ -131,6 +132,8 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
       default:
         if (_pending == 'ok') {
           title = '已更新到 $_pendingVersion';
+          final items = vegaChangelogFor(_pendingVersion);
+          if (items.isNotEmpty) subtitle = items.map((e) => '· $e').join('\n');
           dot = const Color(0xFF34C759);
         } else if (_pending == 'failed') {
           title = '上次更新到 $_pendingVersion 没有生效';
@@ -185,12 +188,21 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
                         color: p.text)),
                 if (subtitle != null) ...[
                   const SizedBox(height: 3),
-                  // 更新说明未签名，只按纯文本显示，最多 3 行。
+                  // 更新说明未签名，只按纯文本显示，最多 8 行。
                   Text(subtitle,
-                      maxLines: 3,
+                      maxLines: 8,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontSize: 12, color: p.secondary)),
                 ],
+                const SizedBox(height: 4),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _showChangelog(context),
+                    child: Text('更新日志',
+                        style: TextStyle(fontSize: 12, color: p.accent)),
+                  ),
+                ),
               ],
             ),
           ),
@@ -229,6 +241,62 @@ class _AuroraButton extends StatelessWidget {
       ),
     );
   }
+}
+
+void _showChangelog(BuildContext context) {
+  final p = VegaColors.of(context);
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 520),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('更新日志',
+                  style: TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final r in vegaChangelog) ...[
+                        Text('Vega ${r.version}  ·  ${r.date}',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: p.text)),
+                        const SizedBox(height: 6),
+                        for (final it in r.items)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('· $it',
+                                style: TextStyle(
+                                    fontSize: 13, color: p.secondary)),
+                          ),
+                        const SizedBox(height: 12),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _PlainButton(
+                    label: '关闭', onTap: () => Navigator.of(ctx).pop()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _PlainButton extends StatelessWidget {
