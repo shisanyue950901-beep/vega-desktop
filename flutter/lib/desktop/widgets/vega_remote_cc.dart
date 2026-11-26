@@ -32,6 +32,8 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
   static const _kPinKey = 'vega-cc-pinned';
   Timer? _tick;
   String _quality = '';
+  // 本次会话是否已因中继自动降过一次画质；降过后用户手动切回 4K 就不再干预。
+  bool _relayCapped = false;
 
   FFI get ffi => widget.ffi;
   SessionID get sid => ffi.sessionId;
@@ -61,7 +63,9 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     _loadQuality();
     // 延迟、帧率、开关状态来自会话，1 秒刷新一次足够。
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      _capForRelay();
+      setState(() {});
     });
   }
 
@@ -127,11 +131,25 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
     if (mounted) setState(() => _quality = next);
   }
 
+  // 走中继且当前是原生 4K：自动降到均衡（中继带宽撑不住 4K60），只做一次。
+  Future<void> _capForRelay() async {
+    if (_relayCapped || ffi.ffiModel.direct != false) return;
+    if (_quality != kRemoteImageQualityBest) return;
+    _relayCapped = true;
+    const q = kRemoteImageQualityBalanced;
+    await bind.sessionSetImageQuality(sessionId: sid, value: q);
+    await bind.sessionSetCustomFps(sessionId: sid, fps: _qualityFps[q]!);
+    if (mounted) setState(() => _quality = q);
+  }
+
   // 原生 4K 需要直连；走中继时带宽不够，画质会被自动压低，直接写明。
   String _qualityText(bool direct) {
     final label = _qualityLabel[_quality] ?? '自定义';
     if (_quality == kRemoteImageQualityBest && !direct) {
       return '4K · 中继受限';
+    }
+    if (_relayCapped && !direct && _quality == kRemoteImageQualityBalanced) {
+      return '均衡 · 中继自动';
     }
     return label;
   }
