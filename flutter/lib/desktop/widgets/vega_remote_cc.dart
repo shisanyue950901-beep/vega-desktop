@@ -149,7 +149,7 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
         if (!valid.hasMatch(id)) return;
         bind.sessionVegaWake(sessionId: sid, targetId: id);
         close();
-        showToast('已让这台电脑发送开机信号');
+        showToast('已发出请求，等待这台电脑回复');
       }
 
       String label(Map<String, dynamic> p) {
@@ -250,7 +250,8 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
         onRestart: _upstream(kShortcutActionRestartRemote),
         onScreenshot: _upstream(kShortcutActionScreenshot),
         onDisconnect: () => closeConnection(id: widget.id),
-        onWake: _wake,
+        // Web 端没有实现，旧版代理也不会回复，入口只给原生桌面端。
+        onWake: isWeb ? null : _wake,
         onMore: widget.onMore,
       ),
     );
