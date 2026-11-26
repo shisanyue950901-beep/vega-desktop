@@ -1,3 +1,4 @@
+import 'vega_shot.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -115,7 +116,7 @@ Future<void> main(List<String> args) async {
       disableWindowMovable(kWindowId);
     }
     // Vega：CI 截图用，VEGA_SHOT_CC=1 展开 / 2 收起，预览远程窗口的控制中心。
-    final shotCc = Platform.environment['VEGA_SHOT_CC'];
+    final shotCc = vegaShotEnv('VEGA_SHOT_CC');
     if (shotCc == '1' || shotCc == '2') {
       await initEnv(kAppTypeMain);
       _runApp('', VegaControlCenterPreview(expanded: shotCc == '1'),
@@ -129,7 +130,7 @@ Future<void> main(List<String> args) async {
       });
       return;
     }
-    if (Platform.environment['VEGA_SHOT_CM'] == '1') {
+    if (vegaShotEnv('VEGA_SHOT_CM') == '1') {
       await _vegaShotCm();
       return;
     }

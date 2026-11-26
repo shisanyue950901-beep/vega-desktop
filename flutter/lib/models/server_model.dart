@@ -1,3 +1,4 @@
+import '../vega_shot.dart';
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
@@ -27,7 +28,7 @@ const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
 
 // Vega：CI 截图用的被控端小窗假连接模式，不与 Rust 侧同步连接列表。
-final bool vegaShotCm = Platform.environment['VEGA_SHOT_CM'] == '1';
+final bool vegaShotCm = vegaShotEnv('VEGA_SHOT_CM') == '1';
 
 class ServerModel with ChangeNotifier {
   bool _isStart = false; // Android MainService status

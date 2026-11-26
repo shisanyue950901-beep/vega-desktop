@@ -1,3 +1,4 @@
+import '../../vega_shot.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -153,7 +154,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       ),
       DesktopSettingPage(
           // Vega：CI 截图用，VEGA_SHOT_ABOUT=1 时设置页直接打开「关于」。
-          initialTabkey: Platform.environment['VEGA_SHOT_ABOUT'] == '1'
+          initialTabkey: vegaShotEnv('VEGA_SHOT_ABOUT') == '1'
               ? SettingsTabKey.about
               : SettingsTabKey.general,
           vegaEmbedded: true),
@@ -1448,7 +1449,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     });
     Get.put<RxBool>(svcStopped, tag: 'stop-service');
     // Vega：CI 截图用，VEGA_SHOT_NAV=0/1/2 直接打开对应页面。
-    final shotNav = int.tryParse(Platform.environment['VEGA_SHOT_NAV'] ?? '');
+    final shotNav = int.tryParse(vegaShotEnv('VEGA_SHOT_NAV') ?? '');
     if (shotNav != null && shotNav >= 0 && shotNav <= 2) {
       vegaNavIndex.value = shotNav;
     }

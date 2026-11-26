@@ -36,7 +36,7 @@ mod manual_update;
 mod version;
 pub use version::*;
 /// Vega 产品版本（应用内更新与关于页使用；协议版本仍是 crate::VERSION）。
-pub const VEGA_VERSION: &str = "0.7.1";
+pub const VEGA_VERSION: &str = "0.7.2";
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 mod bridge_generated;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
