@@ -140,8 +140,18 @@ pub fn send_wol(id: String) -> WolOutcome {
                                 break 'peer;
                             }
                             packets += 1;
-                            log::info!("Send wol to {mac_addr} of {}", ipv4.addr);
-                            match wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))) {
+                            // Vega: send to this interface's own subnet broadcast address
+                            // rather than 255.255.255.255, which Windows may push out of
+                            // every interface.
+                            let bcast = Ipv4Addr::from(
+                                u32::from(ipv4.addr) | !u32::from(ipv4.netmask),
+                            );
+                            log::info!("Send wol to {mac_addr} via {} ({bcast})", ipv4.addr);
+                            match wol::send_wol(
+                                mac_addr,
+                                Some(IpAddr::V4(bcast)),
+                                Some(IpAddr::V4(ipv4.addr)),
+                            ) {
                                 Ok(_) => sent = true,
                                 Err(err) => log::warn!(
                                     "Send wol to {mac_addr} of {} failed: {err}",
