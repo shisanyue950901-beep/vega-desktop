@@ -200,6 +200,11 @@ lazy_static::lazy_static! {
     static ref WAKELOCK_KEEP_AWAKE_OPTION: Arc::<Mutex<Option<bool>>> = Default::default();
 }
 
+// Vega: last accepted misc.vega_wake_lan_peer request, shared by the whole process. A
+// per-Connection field let a client reset the 5s throttle by reconnecting, and did not
+// cover simultaneous connections from the same or different peers.
+static VEGA_LAST_WAKE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
 #[cfg(feature = "flutter")]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const SWITCH_SIDES_UUID_TTL: Duration = Duration::from_secs(10);
@@ -387,8 +392,6 @@ pub struct Connection {
     privacy_mode: bool,
     control_permissions: Option<ControlPermissions>,
     last_test_delay: Option<Instant>,
-    // Vega: last accepted misc.vega_wake_lan_peer request from this peer, for 5s throttling.
-    vega_last_wake: Option<std::time::Instant>,
     network_delay: u32,
     lock_after_session_end: bool,
     show_remote_cursor: bool,
@@ -604,7 +607,6 @@ impl Connection {
             privacy_mode: Self::permission(keys::OPTION_ENABLE_PRIVACY_MODE, &control_permissions),
             control_permissions,
             last_test_delay: None,
-            vega_last_wake: None,
             network_delay: 0,
             lock_after_session_end: false,
             show_remote_cursor: false,
@@ -4118,16 +4120,31 @@ impl Connection {
                             "invalid"
                         } else if !Self::is_valid_wake_lan_peer_id(&id) {
                             "invalid"
-                        } else if self
-                            .vega_last_wake
-                            .map_or(false, |t| t.elapsed().as_secs() < 5)
-                        {
-                            "busy"
                         } else {
-                            self.vega_last_wake = Some(std::time::Instant::now());
-                            Self::wake_lan_peer(id).await
+                            // Vega: the throttle is process-wide and released before the
+                            // blocking wake, so one peer cannot reset it by reconnecting.
+                            let now = std::time::Instant::now();
+                            let allowed = {
+                                let mut last = VEGA_LAST_WAKE
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                                if last.map_or(false, |t| t.elapsed().as_secs() < 5) {
+                                    false
+                                } else {
+                                    *last = Some(now);
+                                    true
+                                }
+                            };
+                            if allowed {
+                                Self::wake_lan_peer(id).await
+                            } else {
+                                "busy"
+                            }
                         };
-                        log::info!("vega wake lan peer: {reply}");
+                        match reply {
+                            "ok" | "unknown" => log::info!("vega wake lan peer: {reply}"),
+                            _ => log::debug!("vega wake lan peer: {reply}"),
+                        }
                         let mut m = Misc::new();
                         m.set_vega_wake_result(reply.into());
                         let mut msg = Message::new();
