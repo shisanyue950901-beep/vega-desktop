@@ -142,7 +142,8 @@ class _VegaRemoteCcState extends State<VegaRemoteCc> {
       }
     } catch (_) {}
     final ctrl = TextEditingController();
-    final valid = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+    // 与上游自定义 ID 规则一致：允许 Unicode 字母数字，只排除空白与过长输入，最终由对端校验。
+    final valid = RegExp(r'^[^\s]{1,64}$');
     ffi.dialogManager.show((setState, close, context) {
       void send(String id) {
         id = id.replaceAll(' ', '').trim();
