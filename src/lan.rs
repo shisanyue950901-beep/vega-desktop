@@ -94,18 +94,29 @@ pub async fn discover() -> ResultType<()> {
     Ok(())
 }
 
+/// Result of a Wake-on-LAN attempt, so a caller (e.g. a remote peer asking this machine to
+/// wake a device in its LAN) can tell "no such device here" from "known, but nothing could
+/// be sent".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WolOutcome {
+    /// The peer is known and at least one magic packet was sent successfully.
+    Sent,
+    /// No peer with that id is in this side's LAN table.
+    NotFound,
+    /// The peer is known, but no interface matched its subnet or every send failed.
+    NotSent,
+}
+
 /// Sends a Wake-on-LAN magic packet to the LAN peer with `id`, using the MAC addresses
 /// remembered by this side's LAN discovery.
-///
-/// Returns true only when such a peer is known and at least one packet was sent
-/// successfully, so a caller (e.g. a remote peer asking this machine to wake a device in
-/// its LAN) can tell "not sent" from "sent".
-pub fn send_wol(id: String) -> bool {
+pub fn send_wol(id: String) -> WolOutcome {
     let interfaces = default_net::get_interfaces();
     let mut sent = false;
+    let mut found = false;
     let mut packets = 0u32;
     'peer: for peer in &config::LanPeers::load().peers {
         if peer.id == id {
+            found = true;
             for (ip, mac) in peer.ip_mac.iter() {
                 // Vega: the map key is the peer IP observed by discovery. The mask check
                 // below used to be removed; it is back because sending through an interface
@@ -144,7 +155,13 @@ pub fn send_wol(id: String) -> bool {
             break;
         }
     }
-    sent
+    if sent {
+        WolOutcome::Sent
+    } else if found {
+        WolOutcome::NotSent
+    } else {
+        WolOutcome::NotFound
+    }
 }
 
 #[inline]
@@ -261,6 +278,11 @@ fn send_query() -> ResultType<Vec<UdpSocket>> {
     Ok(sockets)
 }
 
+// Vega: one receiver thread contributes at most this many peers to a discovery round. The
+// channel is unbounded, so the cap has to sit on the sending side; otherwise a LAN that keeps
+// answering (spoofed source addresses included) grows the queue without limit.
+const MAX_RESPONSES_PER_THREAD: u32 = 512;
+
 fn wait_response(
     socket: UdpSocket,
     timeout: Option<std::time::Duration>,
@@ -268,6 +290,7 @@ fn wait_response(
 ) -> ResultType<()> {
     let started = Instant::now();
     let mut last_recv_time = Instant::now();
+    let mut responses = 0u32;
 
     let local_addr = socket.local_addr();
     let try_get_ip_by_peer = match local_addr.as_ref() {
@@ -278,6 +301,16 @@ fn wait_response(
 
     socket.set_read_timeout(timeout)?;
     loop {
+        // Vega: check the round deadline before every receive, so a `continue` below (an
+        // invalid id, say) passes it too; a busy LAN must not keep this thread alive past one
+        // discovery round.
+        if started.elapsed().as_secs() >= 15 {
+            break;
+        }
+        if tx.is_closed() {
+            // The round already ended and nobody reads the channel any more.
+            break;
+        }
         let mut buf = [0; 2048];
         if let Ok((len, addr)) = socket.recv_from(&mut buf) {
             if let Ok(msg_in) = Message::parse_from_bytes(&buf[0..len]) {
@@ -286,7 +319,7 @@ fn wait_response(
                         last_recv_time = Instant::now();
                         if p.cmd == "pong" {
                             if !crate::common::is_valid_untrusted_peer_id(&p.id) {
-                                log::warn!(
+                                log::trace!(
                                     "Ignoring LAN discovery response from {} with invalid peer id",
                                     addr
                                 );
@@ -315,6 +348,12 @@ fn wait_response(
                             };
 
                             if local_mac.is_empty() && p.mac.is_empty() || local_mac != p.mac {
+                                // Vega: count before sending; the channel is unbounded, so
+                                // each thread stops itself at the cap.
+                                if responses >= MAX_RESPONSES_PER_THREAD {
+                                    break;
+                                }
+                                responses += 1;
                                 allow_err!(tx.send(config::DiscoveryPeer {
                                     id: p.id.clone(),
                                     ip_mac: HashMap::from([
@@ -333,11 +372,6 @@ fn wait_response(
             }
         }
         if last_recv_time.elapsed().as_millis() > 3_000 {
-            break;
-        }
-        // Vega: same hard cap as discover(); a busy LAN that answers without pause must not
-        // keep this socket thread alive past one discovery round.
-        if started.elapsed().as_secs() >= 15 {
             break;
         }
     }
@@ -371,11 +405,25 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
         tokio::select! {
             data = rx.recv() => match data {
                 Some(mut peer) => {
-                    let in_response_set = !response_set.insert(peer.id.clone());
+                    // Vega: the de-dup set is peer-controlled as well, so stop inserting at
+                    // the cap instead of letting a LAN invent fresh ids forever. Ids already
+                    // in the set still count as seen, so the merge below keeps working.
+                    let in_response_set = if response_set.len() < 256 {
+                        !response_set.insert(peer.id.clone())
+                    } else {
+                        response_set.contains(&peer.id)
+                    };
                     if let Some(pos) = peers.iter().position(|x| x.is_same_peer(&peer) ) {
                         let peer1 = peers.remove(pos);
                         if in_response_set {
-                            peer.ip_mac.extend(peer1.ip_mac);
+                            // Vega: cap one peer's address table too; merging the same peer
+                            // over and over must not grow it without bound.
+                            for (ip, mac) in peer1.ip_mac {
+                                if peer.ip_mac.len() >= 16 {
+                                    break;
+                                }
+                                peer.ip_mac.insert(ip, mac);
+                            }
                             peer.online = true;
                         }
                     }
