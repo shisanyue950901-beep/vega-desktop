@@ -85,7 +85,11 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
       version = '0.7.9';
       notes = '· 这是截图用的示例更新说明';
     }
-    if (!widget.checkOnly) vegaSyncUpdateNotice(phase, version, notes);
+    // 推迟到本帧构建结束后再通知首页，避免在构建期间触发其他组件重建。
+    if (!widget.checkOnly) {
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => vegaSyncUpdateNotice(phase, version, notes));
+    }
     if (phase != _phase ||
         version != _version ||
         notes != _notes ||
@@ -127,9 +131,11 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
     String title;
     String? subtitle;
     Color dot = p.secondary;
-    // 升级后首次打开时，「已是最新」让位给上次安装结果的提示。
+    // 升级后首次打开时，「已是最新」或后台检查失败都让位给上次安装结果的提示。
     final viewPhase =
-        (_pending.isNotEmpty && _phase == 'latest') ? 'idle' : _phase;
+        (_pending.isNotEmpty && (_phase == 'latest' || _phase == 'error'))
+            ? 'idle'
+            : _phase;
     switch (viewPhase) {
       case 'checking':
         title = '正在检查更新…';

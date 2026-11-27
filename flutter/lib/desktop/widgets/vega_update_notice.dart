@@ -28,14 +28,8 @@ Map<String, dynamic> _state() {
 }
 
 void _apply(Map<String, dynamic> m) {
-  final phase = (m['phase'] ?? '').toString();
-  if (phase == 'available') {
-    vegaUpdateAvailable.value = (m['version'] ?? '').toString();
-    vegaUpdateNotes.value = (m['notes'] ?? '').toString();
-  } else if (phase == 'latest') {
-    vegaUpdateAvailable.value = '';
-    vegaUpdateNotes.value = '';
-  }
+  vegaSyncUpdateNotice((m['phase'] ?? '').toString(),
+      (m['version'] ?? '').toString(), (m['notes'] ?? '').toString());
 }
 
 void _pollUntilSettled() {
@@ -61,7 +55,11 @@ void _checkOnce() {
     _pollUntilSettled();
     return;
   }
-  if (phase != 'idle' && phase != 'latest') {
+  final version = (m['version'] ?? '').toString();
+  // error 且版本为空 = 上次检查失败（如断网），可以重新检查；
+  // error 且有版本 = 安装失败、清单保留等待用户重试，不打断。
+  final retryableCheck = phase == 'error' && version.isEmpty;
+  if (phase != 'idle' && phase != 'latest' && !retryableCheck) {
     _apply(m);
     return;
   }
@@ -78,7 +76,8 @@ void vegaSyncUpdateNotice(String phase, String version, String notes) {
   if (phase == 'available') {
     vegaUpdateAvailable.value = version;
     vegaUpdateNotes.value = notes;
-  } else if (phase == 'latest') {
+  } else if (phase == 'latest' || (phase == 'error' && version.isEmpty)) {
+    // 已是最新，或检查失败（版本信息已失效）：撤下提示。
     vegaUpdateAvailable.value = '';
     vegaUpdateNotes.value = '';
   }
