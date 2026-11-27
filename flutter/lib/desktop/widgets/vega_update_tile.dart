@@ -10,7 +10,10 @@ import 'package:flutter_hbb/vega_changelog.dart';
 import 'package:flutter_hbb/vega_theme.dart';
 
 class VegaUpdateTile extends StatefulWidget {
-  const VegaUpdateTile({super.key});
+  const VegaUpdateTile({super.key, this.checkOnly = false});
+
+  /// 被远程控制时只允许检查，不显示安装入口（断开后再安装）。
+  final bool checkOnly;
 
   @override
   State<VegaUpdateTile> createState() => _VegaUpdateTileState();
@@ -90,6 +93,7 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
   }
 
   void _install() {
+    if (widget.checkOnly) return;
     bind.mainVegaUpdateInstall();
     _readState();
   }
@@ -112,7 +116,9 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
         break;
       case 'available':
         title = '发现新版本 $_version';
-        subtitle = _notes.isEmpty ? null : _notes;
+        subtitle = widget.checkOnly
+            ? '断开远程后可安装'
+            : (_notes.isEmpty ? null : _notes);
         dot = p.accent;
         break;
       case 'downloading':
@@ -151,8 +157,9 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
         height: 18,
         child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
       );
-    } else if (_phase == 'available' ||
-        (_phase == 'error' && _version.isNotEmpty)) {
+    } else if (!widget.checkOnly &&
+        (_phase == 'available' ||
+            (_phase == 'error' && _version.isNotEmpty))) {
       action = _AuroraButton(
           label: _phase == 'available' ? '立即更新' : '重试', onTap: _install);
     } else {

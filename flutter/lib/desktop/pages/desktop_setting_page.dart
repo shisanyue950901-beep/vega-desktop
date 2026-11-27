@@ -383,10 +383,12 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
                     fontWeight: FontWeight.w700,
                     color: palette.text)),
             const SizedBox(height: 6),
-            Text('设置和检查更新已暂时锁定，断开后自动恢复。\n如需远程操作，请在本机「安全」里\n开启「允许远程修改配置」。',
+            Text('设置已暂时锁定，断开后自动恢复。\n可以检查更新，安装需断开后进行。',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 12.5, height: 1.5, color: palette.secondary)),
+            const SizedBox(height: 6),
+            const VegaUpdateTile(checkOnly: true),
           ],
         ),
       ),
