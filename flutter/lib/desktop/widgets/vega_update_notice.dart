@@ -71,7 +71,7 @@ void _checkOnce() {
   _pollUntilSettled();
 }
 
-/// 「关于」页手动检查得到结果时同步给首页提示条。
+/// 把更新状态同步给首页提示条和侧栏红点。
 void vegaSyncUpdateNotice(String phase, String version, String notes) {
   if (phase == 'available') {
     vegaUpdateAvailable.value = version;
@@ -98,6 +98,8 @@ void vegaStartAutoUpdateCheck() {
     return;
   }
   Timer(const Duration(seconds: 12), _checkOnce);
+  // 主窗口独立跟踪状态（含「关于」页或锁定卡发起的手动检查），不依赖更新卡是否还在。
+  Timer.periodic(const Duration(seconds: 5), (_) => _apply(_state()));
   Timer.periodic(const Duration(hours: 6), (_) => _checkOnce());
 }
 
