@@ -373,6 +373,33 @@ void _runApp(
   Widget home,
   ThemeMode themeMode,
 ) {
+  // Vega：发布版里页面出错时不再只显示灰块，改为显示错误原因（便于用户截图反馈）。
+  if (kReleaseMode) {
+    ErrorWidget.builder = (details) => Align(
+          alignment: Alignment.topLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 160),
+            child: Container(
+              margin: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF4F4),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFFC9C6)),
+              ),
+              child: SingleChildScrollView(
+                child: Text(
+                  '这部分页面出错了，请截图发给开发者：\n${details.exceptionAsString()}',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFB3261E),
+                      decoration: TextDecoration.none),
+                ),
+              ),
+            ),
+          ),
+        );
+  }
   final botToastBuilder = BotToastInit();
   runApp(RefreshWrapper(
     builder: (context) => GetMaterialApp(

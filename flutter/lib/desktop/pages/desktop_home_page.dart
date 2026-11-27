@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_update_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
@@ -119,6 +120,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         banner: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const VegaUpdateBanner(),
             if (!isOutgoingOnly) buildPresetPasswordWarning(),
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),
           ],
@@ -254,6 +256,14 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                               selected ? FontWeight.w600 : FontWeight.w400,
                           color: selected ? palette.accent : palette.text,
                         )),
+                    if (index == 2 && vegaUpdateAvailable.value.isNotEmpty)
+                      Container(
+                        width: 7,
+                        height: 7,
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: const BoxDecoration(
+                            color: Color(0xFFFF453A), shape: BoxShape.circle),
+                      ),
                   ],
                 ),
               ),
@@ -1398,6 +1408,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
+    vegaStartAutoUpdateCheck();
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();

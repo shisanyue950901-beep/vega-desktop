@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/vega_changelog.dart';
+import 'package:flutter_hbb/vega_shot.dart';
 import 'package:flutter_hbb/vega_theme.dart';
 
 class VegaUpdateTile extends StatefulWidget {
@@ -37,6 +38,12 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
     // 锁定卡里不读取上次安装结果：后端读取即删除，留给「关于」页显示。
     if (!widget.checkOnly) _readPending();
     _readState();
+    // CI 截图：模拟「发现新版本」，检查这个状态下页面能正常显示。
+    if (vegaShotEnv('VEGA_SHOT_UPD') == '1') {
+      _phase = 'available';
+      _version = '0.7.9';
+      _notes = '· 这是截图用的示例更新说明';
+    }
   }
 
   @override
