@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 
@@ -24,6 +25,8 @@ const kLoginDialogTag = "LOGIN";
 const kUseTemporaryPassword = "use-temporary-password";
 const kUsePermanentPassword = "use-permanent-password";
 const kUseBothPasswords = "use-both-passwords";
+
+// Vega：CI 截图用的被控端小窗假连接模式，不与 Rust 侧同步连接列表。
 
 class ServerModel with ChangeNotifier {
   bool _isStart = false; // Android MainService status

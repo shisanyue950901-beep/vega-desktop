@@ -77,30 +77,100 @@ pub(super) fn start_listening() -> ResultType<()> {
 pub async fn discover() -> ResultType<()> {
     let sockets = send_query()?;
     let rx = spawn_wait_responses(sockets);
-    handle_received_peers(rx).await?;
+    // Vega: a discovery round needs a hard deadline; otherwise a LAN that keeps answering
+    // (or a socket thread that never closes) keeps this round alive forever. A timeout is
+    // not an error: whatever the handler already stored stays stored.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        handle_received_peers(rx),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_) => log::warn!("lan discover timed out after 15s, ending this round"),
+    }
 
     log::info!("discover ping done");
     Ok(())
 }
 
-pub fn send_wol(id: String) {
+/// Result of a Wake-on-LAN attempt, so a caller (e.g. a remote peer asking this machine to
+/// wake a device in its LAN) can tell "no such device here" from "known, but nothing could
+/// be sent".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WolOutcome {
+    /// The peer is known and at least one magic packet was sent successfully.
+    Sent,
+    /// No peer with that id is in this side's LAN table.
+    NotFound,
+    /// The peer is known, but no interface matched its subnet or every send failed.
+    NotSent,
+}
+
+/// Sends a Wake-on-LAN magic packet to the LAN peer with `id`, using the MAC addresses
+/// remembered by this side's LAN discovery.
+pub fn send_wol(id: String) -> WolOutcome {
     let interfaces = default_net::get_interfaces();
-    for peer in &config::LanPeers::load().peers {
+    let mut sent = false;
+    let mut found = false;
+    let mut packets = 0u32;
+    'peer: for peer in &config::LanPeers::load().peers {
         if peer.id == id {
-            for (_, mac) in peer.ip_mac.iter() {
+            found = true;
+            for (ip, mac) in peer.ip_mac.iter() {
+                // Vega: the map key is the peer IP observed by discovery. The mask check
+                // below used to be removed; it is back because sending through an interface
+                // of another subnet broadcasts the magic packet into the wrong network and
+                // never reaches the target. An unparsable key is skipped entirely.
+                let peer_ip = match ip.parse::<Ipv4Addr>() {
+                    Ok(peer_ip) => peer_ip,
+                    Err(_) => continue,
+                };
                 if let Ok(mac_addr) = mac.parse() {
                     for interface in &interfaces {
                         for ipv4 in &interface.ipv4 {
-                            // remove below mask check to avoid unexpected bug
-                            // if (u32::from(ipv4.addr) & u32::from(ipv4.netmask)) == (u32::from(peer_ip) & u32::from(ipv4.netmask))
-                            log::info!("Send wol to {mac_addr} of {}", ipv4.addr);
-                            allow_err!(wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))));
+                            if (u32::from(ipv4.addr) & u32::from(ipv4.netmask))
+                                != (u32::from(peer_ip) & u32::from(ipv4.netmask))
+                            {
+                                continue;
+                            }
+                            // Vega: at most 16 packets per target, so a table with many
+                            // addresses or interfaces cannot turn one request into a flood.
+                            if packets >= 16 {
+                                break 'peer;
+                            }
+                            packets += 1;
+                            // Vega: send to this interface's own subnet broadcast address
+                            // rather than 255.255.255.255, which Windows may push out of
+                            // every interface.
+                            let bcast = Ipv4Addr::from(
+                                u32::from(ipv4.addr) | !u32::from(ipv4.netmask),
+                            );
+                            log::info!("Send wol to {mac_addr} via {} ({bcast})", ipv4.addr);
+                            match wol::send_wol(
+                                mac_addr,
+                                Some(IpAddr::V4(bcast)),
+                                Some(IpAddr::V4(ipv4.addr)),
+                            ) {
+                                Ok(_) => sent = true,
+                                Err(err) => log::warn!(
+                                    "Send wol to {mac_addr} of {} failed: {err}",
+                                    ipv4.addr
+                                ),
+                            }
                         }
                     }
                 }
             }
             break;
         }
+    }
+    if sent {
+        WolOutcome::Sent
+    } else if found {
+        WolOutcome::NotSent
+    } else {
+        WolOutcome::NotFound
     }
 }
 
@@ -218,12 +288,19 @@ fn send_query() -> ResultType<Vec<UdpSocket>> {
     Ok(sockets)
 }
 
+// Vega: one receiver thread contributes at most this many peers to a discovery round. The
+// channel is unbounded, so the cap has to sit on the sending side; otherwise a LAN that keeps
+// answering (spoofed source addresses included) grows the queue without limit.
+const MAX_RESPONSES_PER_THREAD: u32 = 512;
+
 fn wait_response(
     socket: UdpSocket,
     timeout: Option<std::time::Duration>,
     tx: UnboundedSender<config::DiscoveryPeer>,
 ) -> ResultType<()> {
+    let started = Instant::now();
     let mut last_recv_time = Instant::now();
+    let mut responses = 0u32;
 
     let local_addr = socket.local_addr();
     let try_get_ip_by_peer = match local_addr.as_ref() {
@@ -234,6 +311,16 @@ fn wait_response(
 
     socket.set_read_timeout(timeout)?;
     loop {
+        // Vega: check the round deadline before every receive, so a `continue` below (an
+        // invalid id, say) passes it too; a busy LAN must not keep this thread alive past one
+        // discovery round.
+        if started.elapsed().as_secs() >= 15 {
+            break;
+        }
+        if tx.is_closed() {
+            // The round already ended and nobody reads the channel any more.
+            break;
+        }
         let mut buf = [0; 2048];
         if let Ok((len, addr)) = socket.recv_from(&mut buf) {
             if let Ok(msg_in) = Message::parse_from_bytes(&buf[0..len]) {
@@ -242,7 +329,7 @@ fn wait_response(
                         last_recv_time = Instant::now();
                         if p.cmd == "pong" {
                             if !crate::common::is_valid_untrusted_peer_id(&p.id) {
-                                log::warn!(
+                                log::trace!(
                                     "Ignoring LAN discovery response from {} with invalid peer id",
                                     addr
                                 );
@@ -271,6 +358,12 @@ fn wait_response(
                             };
 
                             if local_mac.is_empty() && p.mac.is_empty() || local_mac != p.mac {
+                                // Vega: count before sending; the channel is unbounded, so
+                                // each thread stops itself at the cap.
+                                if responses >= MAX_RESPONSES_PER_THREAD {
+                                    break;
+                                }
+                                responses += 1;
                                 allow_err!(tx.send(config::DiscoveryPeer {
                                     id: p.id.clone(),
                                     ip_mac: HashMap::from([
@@ -322,15 +415,34 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
         tokio::select! {
             data = rx.recv() => match data {
                 Some(mut peer) => {
-                    let in_response_set = !response_set.insert(peer.id.clone());
+                    // Vega: the de-dup set is peer-controlled as well, so stop inserting at
+                    // the cap instead of letting a LAN invent fresh ids forever. Ids already
+                    // in the set still count as seen, so the merge below keeps working.
+                    let in_response_set = if response_set.len() < 256 {
+                        !response_set.insert(peer.id.clone())
+                    } else {
+                        response_set.contains(&peer.id)
+                    };
                     if let Some(pos) = peers.iter().position(|x| x.is_same_peer(&peer) ) {
                         let peer1 = peers.remove(pos);
                         if in_response_set {
-                            peer.ip_mac.extend(peer1.ip_mac);
+                            // Vega: cap one peer's address table too; merging the same peer
+                            // over and over must not grow it without bound.
+                            for (ip, mac) in peer1.ip_mac {
+                                if peer.ip_mac.len() >= 16 {
+                                    break;
+                                }
+                                peer.ip_mac.insert(ip, mac);
+                            }
                             peer.online = true;
                         }
                     }
                     peers.insert(0, peer);
+                    // Vega: cap the table after the merge/insert logic above has run, so a
+                    // chatty LAN segment cannot grow it without bound.
+                    if peers.len() > 256 {
+                        peers.truncate(256);
+                    }
                     if last_write_time.map(|t| t.elapsed().as_millis() > 300).unwrap_or(true)  {
                         config::LanPeers::store(&peers);
                         #[cfg(feature = "flutter")]
@@ -345,6 +457,11 @@ async fn handle_received_peers(mut rx: UnboundedReceiver<config::DiscoveryPeer>)
         }
     }
 
+    // Vega: also bound what was loaded, so a table left oversized by an older build is
+    // shrunk on this save instead of staying above the limit until 256 new peers arrive.
+    if peers.len() > 256 {
+        peers.truncate(256);
+    }
     config::LanPeers::store(&peers);
     #[cfg(feature = "flutter")]
     crate::flutter_ffi::main_load_lan_peers();

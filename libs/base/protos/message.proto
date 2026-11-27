@@ -872,6 +872,10 @@ message Misc {
     // is rebuilt, and held again, the next time it is shown, before any connection names it
     // by id again, so the shape just selected is always there to give.
     uint64 request_cursor_data = 39;
+    // Vega: ask this peer to send Wake-on-LAN to a device in its LAN, by device id.
+    string vega_wake_lan_peer = 100;
+    // Vega: result of vega_wake_lan_peer: "ok", "unknown", "busy", "invalid".
+    string vega_wake_result = 101;
   }
 }
 

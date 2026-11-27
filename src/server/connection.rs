@@ -200,6 +200,11 @@ lazy_static::lazy_static! {
     static ref WAKELOCK_KEEP_AWAKE_OPTION: Arc::<Mutex<Option<bool>>> = Default::default();
 }
 
+// Vega: last accepted misc.vega_wake_lan_peer request, shared by the whole process. A
+// per-Connection field let a client reset the 5s throttle by reconnecting, and did not
+// cover simultaneous connections from the same or different peers.
+static VEGA_LAST_WAKE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
 #[cfg(feature = "flutter")]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const SWITCH_SIDES_UUID_TTL: Duration = Duration::from_secs(10);
@@ -2258,6 +2263,34 @@ impl Connection {
         self.port_forward_socket.is_some() || self.port_forward_mux.is_some()
     }
 
+    // Vega: a wake id is a device id as carried by the rendezvous servers. Reuse the shared
+    // untrusted-id rule instead of a local copy, and keep the length tighter, so a peer
+    // cannot push anything else into the LAN table lookup.
+    fn is_valid_wake_lan_peer_id(id: &str) -> bool {
+        id.len() <= 64 && crate::common::is_valid_untrusted_peer_id(id)
+    }
+
+    // Vega: send the magic packet through this machine's own LAN table (the MAC was learned
+    // by local discovery, never supplied by the peer). Blocking work goes to the pool.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    async fn wake_lan_peer(id: String) -> &'static str {
+        match tokio::task::spawn_blocking(move || crate::lan::send_wol(id)).await {
+            Ok(crate::lan::WolOutcome::Sent) => "ok",
+            Ok(crate::lan::WolOutcome::NotFound) => "unknown",
+            Ok(crate::lan::WolOutcome::NotSent) => "unsent",
+            Err(err) => {
+                log::warn!("vega wake lan peer task failed: {err}");
+                "unknown"
+            }
+        }
+    }
+
+    // No LAN discovery/table on mobile builds, so a wake request can never be honoured.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    async fn wake_lan_peer(_id: String) -> &'static str {
+        "unknown"
+    }
+
     fn try_sub_monitor_services(&mut self) {
         let is_remote = self.is_remote();
         if is_remote && !self.services_subed {
@@ -4081,6 +4114,52 @@ impl Connection {
                             }
                         }
                     }
+                    // Vega: a controller asks this online machine to send Wake-on-LAN to a
+                    // device in this machine's own LAN. Only an authorized plain remote
+                    // control session may ask; the MAC comes from this side's discovery
+                    // table, never from the peer.
+                    Some(misc::Union::VegaWakeLanPeer(id)) => {
+                        let reply = if !self.authorized || !self.is_remote() {
+                            "invalid"
+                        } else if !Self::is_valid_wake_lan_peer_id(&id) {
+                            "invalid"
+                        } else {
+                            // Vega: the throttle is process-wide and released before the
+                            // blocking wake, so one peer cannot reset it by reconnecting.
+                            let now = std::time::Instant::now();
+                            let allowed = {
+                                let mut last = VEGA_LAST_WAKE
+                                    .lock()
+                                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                                if last.map_or(false, |t| t.elapsed().as_secs() < 5) {
+                                    false
+                                } else {
+                                    *last = Some(now);
+                                    true
+                                }
+                            };
+                            if allowed {
+                                Self::wake_lan_peer(id).await
+                            } else {
+                                "busy"
+                            }
+                        };
+                        match reply {
+                            "ok" | "unknown" | "unsent" => {
+                                log::info!("vega wake lan peer: {reply}")
+                            }
+                            // Vega: "busy" and "invalid" are the peer's own doing and say
+                            // nothing a user needs in the log file.
+                            _ => log::trace!("vega wake lan peer: {reply}"),
+                        }
+                        let mut m = Misc::new();
+                        m.set_vega_wake_result(reply.into());
+                        let mut msg = Message::new();
+                        msg.set_misc(m);
+                        self.send(msg).await;
+                    }
+                    // Vega: the answer to a wake request; a controlled side has nothing to do.
+                    Some(misc::Union::VegaWakeResult(_)) => {}
                     _ => {}
                 },
                 Some(message::Union::AudioFrame(frame)) => {
@@ -5849,6 +5928,12 @@ impl Connection {
         self.authed_conn_id.as_ref().map(|id| id.conn_type())
     }
 
+    // Vega: these two misc variants are sent on the peer's own schedule, so repeats of an
+    // out-of-scope wake message must not fill the log file.
+    fn is_vega_wake_misc_family(message: &'static str) -> bool {
+        matches!(message, "misc.vega_wake_lan_peer" | "misc.vega_wake_result")
+    }
+
     async fn handle_authorized_scope_violation(&mut self, message: &'static str) -> bool {
         let conn_type = self
             .authed_conn_type()
@@ -5858,6 +5943,12 @@ impl Connection {
         if is_first {
             log::warn!(
                 "Received out-of-scope message in {} session: {}",
+                conn_type,
+                message
+            );
+        } else if Self::is_vega_wake_misc_family(message) {
+            log::trace!(
+                "Received repeated out-of-scope message in {} session: {}",
                 conn_type,
                 message
             );
@@ -6221,6 +6312,8 @@ impl Connection {
             Some(misc::Union::ChangeDisplayResolution(_)) => "misc.change_display_resolution",
             Some(misc::Union::MessageQuery(_)) => "misc.message_query",
             Some(misc::Union::FollowCurrentDisplay(_)) => "misc.follow_current_display",
+            Some(misc::Union::VegaWakeLanPeer(_)) => "misc.vega_wake_lan_peer",
+            Some(misc::Union::VegaWakeResult(_)) => "misc.vega_wake_result",
             Some(misc::Union::SwitchSidesRequest(_)) => "misc.switch_sides_request",
             Some(_) => "misc.other",
             None => "misc.empty",

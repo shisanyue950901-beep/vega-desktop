@@ -237,6 +237,8 @@ jobs:
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+          # Vega: 下载给用户的就是安装程序——文件名以 install.exe 结尾时双击直接进入安装页。
+          cp ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe ./SignOutput/Vega-Install.exe
 
       - name: UI 截图
         shell: pwsh
@@ -266,9 +268,9 @@ jobs:
           }
           "@
           # Vega: 先浅色、再深色各截一张
-          function Invoke-VegaShot([string]$name) {
-            Write-Host "Launching $exe"
-            $proc = Start-Process -FilePath $exe -PassThru
+          function Invoke-VegaShot([string]$name, [string[]]$exeArgs = @()) {
+            Write-Host "Launching $exe $exeArgs"
+            if ($exeArgs.Count -gt 0) { $proc = Start-Process -FilePath $exe -ArgumentList $exeArgs -PassThru } else { $proc = Start-Process -FilePath $exe -PassThru }
             $out = $null
             $ready = $false
             $deadline = (Get-Date).AddSeconds(60)
@@ -318,10 +320,277 @@ jobs:
             if ($out) { Get-Item $out | Format-List FullName, Length }
           }
           try { Invoke-VegaShot "shot-home.png" } catch { Write-Host "light capture failed: $_" }
+          foreach ($nav in @(@(1, "shot-devices.png"), @(2, "shot-settings.png"))) {
+            Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep 2
+            $env:VEGA_SHOT_NAV = "$($nav[0])"
+            try { Invoke-VegaShot $nav[1] } catch { Write-Host "nav capture failed: $_" }
+          }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_NAV = "2"
+          $env:VEGA_SHOT_ABOUT = "1"
+          try { Invoke-VegaShot "shot-about.png" } catch { Write-Host "about capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Remove-Item Env:VEGA_SHOT_ABOUT -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_NAV = "2"
+          $env:VEGA_SHOT_LOCK = "1"
+          try { Invoke-VegaShot "shot-lock.png" } catch { Write-Host "lock capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Remove-Item Env:VEGA_SHOT_LOCK -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_UPD = "1"
+          try { Invoke-VegaShot "shot-upd-home.png" } catch { Write-Host "upd home capture failed: $_" }
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_NAV = "2"
+          $env:VEGA_SHOT_ABOUT = "1"
+          try { Invoke-VegaShot "shot-upd-about.png" } catch { Write-Host "upd about capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_NAV -ErrorAction SilentlyContinue
+          Remove-Item Env:VEGA_SHOT_ABOUT -ErrorAction SilentlyContinue
+          Remove-Item Env:VEGA_SHOT_UPD -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          # 打开系统「透明效果」，让亚克力有机会在 CI 上画出来。
+          reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" /v EnableTransparency /t REG_DWORD /d 1 /f | Out-Null
+          foreach ($cc in @(@("1", "shot-cc.png"), @("2", "shot-cc-collapsed.png"))) {
+            Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep 2
+            $env:VEGA_SHOT_CC = $cc[0]
+            try { Invoke-VegaShot $cc[1] } catch { Write-Host "cc capture failed: $_" }
+          }
+          Remove-Item Env:VEGA_SHOT_CC -ErrorAction SilentlyContinue
           Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'dark'`n"
           Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep 2
           try { Invoke-VegaShot "shot-dark.png" } catch { Write-Host "dark capture failed: $_" }
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          $env:VEGA_SHOT_CC = "1"
+          try { Invoke-VegaShot "shot-cc-dark.png" } catch { Write-Host "cc dark capture failed: $_" }
+          Remove-Item Env:VEGA_SHOT_CC -ErrorAction SilentlyContinue
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          try { Invoke-VegaShot "shot-install-dark.png" @("--install") } catch { Write-Host "install dark capture failed: $_" }
+          Set-Content -Path (Join-Path $cfgDir "Vega_local.toml") -Encoding utf8 -Value "[options]`nlang = 'zh-cn'`ntheme = 'light'`n"
+          Get-Process vega -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep 2
+          try { Invoke-VegaShot "shot-install.png" @("--install") } catch { Write-Host "install light capture failed: $_" }
+
+      - name: 覆盖安装验证
+        shell: pwsh
+        continue-on-error: false
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # 服务名：安装脚本用 `sc create {app_name}` 注册服务，app_name 来自
+          # crate::get_app_name()，默认即 "Vega"。先按任务单 grep 源码确认，能在源码里
+          # 解析到字面量服务名时优先用字面量，否则沿用 "Vega"。
+          $svc = "Vega"
+          $svcHits = @(Select-String -Path "src/platform/windows.rs" -Pattern 'create_service|sc create|crate::get_app_name\(\)' -ErrorAction SilentlyContinue |
+            Select-Object -First 10)
+          $svcHits | ForEach-Object { Write-Host ("{0}:{1}: {2}" -f (Split-Path $_.Path -Leaf), $_.LineNumber, $_.Line.Trim()) }
+          foreach ($hit in $svcHits) {
+            if ($hit.Line -match 'sc create\s+([A-Za-z0-9_.\-]+)') { $svc = $Matches[1]; break }
+          }
+          Write-Host "服务名: $svc"
+
+          $exe = "./SignOutput/Vega-Install.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "installer not found at $exe"
+            Get-ChildItem -Path ./SignOutput -Recurse -Filter *.exe -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+            throw "安装程序不存在: $exe"
+          }
+          Get-Item $exe | Format-List FullName, Length
+
+          $installed = Join-Path $env:ProgramFiles "Vega\vega.exe"
+
+          # 截图阶段留下的 vega 进程只按命令行结束：带 --service（服务进程）或
+          # --server（已连接的服务端进程）的一律保留，避免影响安装和后续服务状态检查。
+          $leftover = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { -not ($_.CommandLine -and ($_.CommandLine -match '--service|--server')) })
+          foreach ($proc in $leftover) {
+            Write-Host "结束截图残留进程 PID=$($proc.ProcessId) CommandLine=$($proc.CommandLine)"
+            Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          }
+          Start-Sleep 2
+
+          # 启动安装并等到真正装完：安装器进程退出、没有带 --silent-install 的
+          # vega.exe 在跑、且服务已存在并处于 Running，三者同时满足才算完成。
+          function Run-Install([string]$installer) {
+            Write-Host "=== 运行 $installer --silent-install ==="
+            $p = Start-Process -FilePath $installer -ArgumentList "--silent-install" -PassThru
+            $deadline = (Get-Date).AddSeconds(180)
+            $installerExited = $false
+            $installProcs = @()
+            $svcRunning = $false
+            while ((Get-Date) -lt $deadline) {
+              try { $p.Refresh() } catch { }
+              $installerExited = $p.HasExited
+              $installProcs = @(Get-CimInstance Win32_Process -Filter "Name='vega.exe'" -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -and ($_.CommandLine -match '--silent-install') })
+              $svcObj = Get-Service -Name $svc -ErrorAction SilentlyContinue
+              $svcRunning = ($null -ne $svcObj) -and ($svcObj.Status -eq 'Running')
+              if ($installerExited -and $installProcs.Count -eq 0 -and $svcRunning) {
+                Write-Host "安装完成: installer exit=$($p.ExitCode)，服务 $svc 状态 Running"
+                return
+              }
+              Write-Host ("等待安装: installerExited={0} --silent-install 进程={1} 服务Running={2}" -f $installerExited, $installProcs.Count, $svcRunning)
+              Start-Sleep 3
+            }
+            $reasons = @()
+            if (-not $installerExited) { $reasons += "安装程序 180 秒内没有退出" }
+            if ($installProcs.Count -gt 0) { $reasons += "仍有 --silent-install 的 vega.exe 在运行" }
+            if (-not $svcRunning) { $reasons += "服务 $svc 不存在或未处于 Running" }
+            throw ("安装超时(180s)未满足: " + ($reasons -join '; '))
+          }
+
+          # 不用 --set-id（会联网注册），也不用 --get-id / --option KEY 读回
+          # （可能命中 runner 用户的本地缓存，证明不了服务侧状态）。
+          # 设备 ID 只从服务自己写的 Vega.toml 取；"标记生效"只以服务写盘的
+          # Vega2.toml 包含该标记为准；"覆盖安装真的执行"以被删掉的安装目录
+          # 文件重新出现为准。
+          $installDir = Join-Path $env:ProgramFiles "Vega"
+          $cfgCandidates = @(
+            (Join-Path $env:windir "ServiceProfiles\LocalService\AppData\Roaming\Vega\config"),
+            (Join-Path $env:windir "System32\config\systemprofile\AppData\Roaming\Vega\config")
+          )
+          $userCfgDir = Join-Path $env:APPDATA "Vega\config"
+
+          # 在候选目录里等一个存在的 Vega.toml，返回完整路径（超时返回 $null）。
+          function Find-VegaToml([string[]]$dirs, [int]$timeoutSec) {
+            $deadline = (Get-Date).AddSeconds($timeoutSec)
+            while ($true) {
+              foreach ($d in $dirs) {
+                $f = Join-Path $d "Vega.toml"
+                if (Test-Path -LiteralPath $f) { return $f }
+              }
+              if ((Get-Date) -ge $deadline) { return $null }
+              Start-Sleep 2
+            }
+          }
+
+          # 从 Vega.toml 的 id = '...' / id = "..." 取值，取不到返回空串。
+          function Get-ConfigId([string]$path) {
+            if (-not (Test-Path -LiteralPath $path)) { return "" }
+            $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrEmpty($text)) { return "" }
+            # toml::to_string_pretty 写出来是 `id = "..."` / `id = '...'`，等号后
+            # 允许空白；取第一个引号外的非空白 token 作为 ID。
+            # Config::store() 把 ID 存为 enc_id（id 置空不写出），两者都认，优先 enc_id。
+            $m = [regex]::Match($text, '^\s*enc_id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            if (-not $m.Success) {
+              $m = [regex]::Match($text, '^\s*id\s*=\s*''?\"?([^''\"\s]+)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+            }
+            if (-not $m.Success) { return "" }
+            return $m.Groups[1].Value.Trim()
+          }
+
+          function Test-ConfigContains([string]$path, [string]$needle) {
+            if (-not (Test-Path -LiteralPath $path)) { return $false }
+            $t = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
+            return (-not [string]::IsNullOrEmpty($t)) -and $t.Contains($needle)
+          }
+
+          try {
+            # 1) 首次安装
+            Run-Install $exe
+            Write-Host "首次安装完成: $installed"
+
+            # 2) 找服务侧配置：两个服务账户 profile 下任一个存在的 Vega.toml
+            $cfgFile = Find-VegaToml $cfgCandidates 60
+            if ($null -eq $cfgFile) {
+              Write-Host "=== 诊断: 服务 profile 下没有找到 Vega.toml ==="
+              foreach ($d in ($cfgCandidates + $userCfgDir)) {
+                Write-Host "--- $d ---"
+                Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue |
+                  ForEach-Object { Write-Host ("  {0} {1} {2}" -f $_.Mode, $_.Length, $_.Name) }
+              }
+              throw "60 秒内没有在服务 profile 下找到 Vega.toml"
+            }
+            $cfgDir = Split-Path -Parent $cfgFile
+            $cfgMain = Join-Path $cfgDir "Vega.toml"
+            $cfgOpts = Join-Path $cfgDir "Vega2.toml"
+            Write-Host "服务配置目录: $cfgDir"
+
+            # --server 在服务 Running 之后才加载配置并写出 enc_id，最多等 60 秒。
+            $idDeadline = (Get-Date).AddSeconds(60)
+            $id1 = Get-ConfigId $cfgMain
+            while ([string]::IsNullOrEmpty($id1) -and (Get-Date) -lt $idDeadline) {
+              Start-Sleep 3
+              $id1 = Get-ConfigId $cfgMain
+            }
+            if ([string]::IsNullOrEmpty($id1)) { throw "Vega.toml 里没有解析到设备 ID: $cfgMain" }
+            Write-Host "首次安装 ID=$id1"
+
+            # 3) 标记选项：写入后只认服务写盘的 Vega2.toml 含该标记，不读本地缓存
+            $marker = [guid]::NewGuid().ToString("N")
+            # IPC 可能尚未就绪：每 5 秒重发一次，最多 60 秒，直到服务写盘。
+            $markerDeadline = (Get-Date).AddSeconds(60)
+            while (-not (Test-ConfigContains $cfgOpts $marker)) {
+              if ((Get-Date) -ge $markerDeadline) { throw "标记未写入服务配置" }
+              $setMarkerOut = (& $installed --option vega-ci-marker $marker 2>&1 | Out-String).Trim()
+              Write-Host "set option output: $setMarkerOut"
+              Start-Sleep 5
+            }
+            Write-Host "标记已由服务写入: $cfgOpts"
+
+            # 4) 覆盖安装证据：两次安装之间删掉安装目录里的一个非 exe/dll 文件，
+            #    覆盖安装必须把它重新写回来（否则说明安装器其实没跑成）。
+            $witness = Join-Path $installDir "LICENCE"
+            if (-not (Test-Path -LiteralPath $witness)) {
+              $pick = Get-ChildItem -LiteralPath $installDir -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -notin @(".exe", ".dll") } |
+                Select-Object -First 1
+              if ($null -eq $pick) { throw "安装目录里没有可用于验证覆盖安装的文件: $installDir" }
+              $witness = $pick.FullName
+            }
+            Write-Host "覆盖安装证据文件: $witness"
+            Remove-Item -LiteralPath $witness -Force
+            if (Test-Path -LiteralPath $witness) { throw "删除证据文件失败: $witness" }
+
+            # 5) 覆盖安装（同一个安装程序再跑一次）
+            Run-Install $exe
+            Write-Host "覆盖安装完成: $installed"
+
+            $witnessDeadline = (Get-Date).AddSeconds(60)
+            while (-not (Test-Path -LiteralPath $witness)) {
+              if ((Get-Date) -ge $witnessDeadline) { throw "覆盖安装没有执行" }
+              Start-Sleep 2
+            }
+            Write-Host "覆盖安装已重新写入: $witness"
+
+            # 6) 覆盖后：服务配置里的 ID 不变，标记仍在
+            $idDeadline = (Get-Date).AddSeconds(15)
+            $id2 = ""
+            while ([string]::IsNullOrEmpty($id2)) {
+              $id2 = Get-ConfigId $cfgMain
+              if (-not [string]::IsNullOrEmpty($id2)) { break }
+              if ((Get-Date) -ge $idDeadline) { break }
+              Start-Sleep 2
+            }
+            Write-Host "覆盖安装后 ID=$id2"
+            if ($id2 -ne $id1) { throw "覆盖安装后设备 ID 变了: $id1 -> $id2" }
+            if (-not (Test-ConfigContains $cfgOpts $marker)) { throw "覆盖安装后标记丢失: $cfgOpts" }
+
+            Write-Host "覆盖安装验证通过 ID=$id1"
+          } finally {
+            # runner 是一次性的，任务结束即销毁，这里不做卸载；只打印服务状态，便于排查失败。
+            Write-Host "=== 诊断: 服务 $svc 状态 ==="
+            $svcFinal = Get-Service -Name $svc -ErrorAction SilentlyContinue
+            if ($null -eq $svcFinal) {
+              Write-Host "服务 $svc 不存在"
+            } else {
+              $svcFinal | Format-List Name, Status, StartType, DisplayName | Out-String | Write-Host
+            }
+          }
 
       - name: Upload vega-screenshots
         continue-on-error: true
@@ -337,5 +606,6 @@ jobs:
           name: vega-windows-x64
           path: |
             ./SignOutput/vega-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
+            ./SignOutput/Vega-Install.exe
             ./rustdesk/
           if-no-files-found: error

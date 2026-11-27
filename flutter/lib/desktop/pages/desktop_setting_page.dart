@@ -29,6 +29,8 @@ import '../../common/widgets/dialog.dart';
 import '../../common/widgets/login.dart';
 import 'package:flutter_hbb/vega_links.dart';
 import 'package:flutter_hbb/vega_theme.dart';
+import 'package:flutter_hbb/vega_shot.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_update_tile.dart';
 
 const double _kTabWidth = 200;
 const double _kTabHeight = 42;
@@ -63,6 +65,11 @@ enum SettingsTabKey {
   about,
 }
 
+/// Vega 修改：设置嵌入主界面右侧（左侧栏「设置」），不再另开标签页。
+/// 0 = 远程协助，1 = 我的设备，2 = 设置。
+final RxInt vegaNavIndex = 0.obs;
+bool vegaSettingsEmbedded = false;
+
 class DesktopSettingPage extends StatefulWidget {
   final SettingsTabKey initialTabkey;
 
@@ -93,13 +100,35 @@ class DesktopSettingPage extends StatefulWidget {
     SettingsTabKey.about,
   ];
 
-  DesktopSettingPage({Key? key, required this.initialTabkey}) : super(key: key);
+  final bool vegaEmbedded;
+
+  DesktopSettingPage(
+      {Key? key, required this.initialTabkey, this.vegaEmbedded = false})
+      : super(key: key);
+
+  /// Vega：切到主界面里的设置，并跳到指定分组。
+  static void vegaShowEmbedded(SettingsTabKey page) {
+    vegaNavIndex.value = 2;
+    final index = tabKeys.indexOf(page);
+    if (index < 0) return;
+    if (Get.isRegistered<PageController>(tag: _kSettingPageControllerTag)) {
+      final c = Get.find<PageController>(tag: _kSettingPageControllerTag);
+      if (c.hasClients) c.jumpToPage(index);
+    }
+    if (Get.isRegistered<Rx<SettingsTabKey>>(tag: _kSettingPageTabKeyTag)) {
+      Get.find<Rx<SettingsTabKey>>(tag: _kSettingPageTabKeyTag).value = page;
+    }
+  }
 
   @override
   State<DesktopSettingPage> createState() =>
       _DesktopSettingPageState(initialTabkey);
 
   static void switch2page(SettingsTabKey page) {
+    if (vegaSettingsEmbedded) {
+      vegaShowEmbedded(page);
+      return;
+    }
     try {
       int index = tabKeys.indexOf(page);
       if (index == -1) {
@@ -264,7 +293,8 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     // check both mouseMoveTime and videoConnCount
     return Obx(() {
       final videoConnBlock =
-          _canBeBlocked.value && stateGlobal.videoConnCount > 0;
+          (_canBeBlocked.value && stateGlobal.videoConnCount > 0) ||
+              _vegaShotLock;
       return Stack(children: [
         buildRemoteBlock(
           block: _block,
@@ -276,9 +306,12 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
           ),
         ),
         if (videoConnBlock)
-          Container(
-            color: Colors.black.withOpacity(0.5),
-          )
+          // Vega：上游是 50% 黑色遮罩，嵌入主界面时换成提示卡（锁定逻辑不变）。
+          widget.vegaEmbedded
+              ? Positioned.fill(child: _vegaLockNotice(VegaColors.of(context)))
+              : Container(
+                  color: Colors.black.withOpacity(0.5),
+                )
       ]);
     });
   }
@@ -289,7 +322,9 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.background,
       body: _buildBlock(
-        children: <Widget>[
+        children: widget.vegaEmbedded
+            ? <Widget>[Expanded(child: _vegaEmbeddedBody(context))]
+            : <Widget>[
           SizedBox(
             width: _kTabWidth,
             child: Column(
@@ -313,6 +348,131 @@ class _DesktopSettingPageState extends State<DesktopSettingPage>
         ],
       ),
     );
+  }
+
+  // CI 截图用：VEGA_SHOT_LOCK=1 时显示锁定提示（只在 GitHub Actions 里生效）。
+  static final bool _vegaShotLock =
+      !isWeb && vegaShotEnv('VEGA_SHOT_LOCK') == '1';
+
+  Widget _vegaLockNotice(VegaPalette palette) {
+    return Container(
+      color: palette.bg.withOpacity(0.72),
+      alignment: Alignment.center,
+      child: Container(
+        width: 360,
+        padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+        decoration: BoxDecoration(
+          color: palette.card,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: palette.separator),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 24,
+                offset: const Offset(0, 8)),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.lock_outline_rounded, size: 28, color: palette.accent),
+            const SizedBox(height: 10),
+            Text('正在被远程控制',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: palette.text)),
+            const SizedBox(height: 6),
+            Text(
+                isWindows
+                    ? '设置已暂时锁定，断开后自动恢复。\n可以检查更新，安装需断开后进行。'
+                    : '设置已暂时锁定，断开后自动恢复。',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12.5, height: 1.5, color: palette.secondary)),
+            if (isWindows) ...[
+              const SizedBox(height: 6),
+              const VegaUpdateTile(checkOnly: true),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Vega：嵌入主界面时的布局——大标题 + 顶部分组标签 + 内容。
+  Widget _vegaEmbeddedBody(BuildContext context) {
+    final palette = VegaColors.of(context);
+    final tabs = _settingTabs();
+    return Container(
+      color: palette.bg,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 24, 28, 8),
+            child: Text('设置',
+                style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: palette.text)),
+          ),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [for (final t in tabs) _vegaTopTab(t, palette)]),
+          ),
+          Divider(height: 1, thickness: 1, color: palette.separator)
+              .marginSymmetric(horizontal: 28),
+          Expanded(
+            child: PageView(
+              controller: controller,
+              physics: const NeverScrollableScrollPhysics(),
+              children: _children(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _vegaTopTab(_TabInfo tab, VegaPalette palette) {
+    return Obx(() {
+      final selected = tab.key == selectedTab.value;
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          final index = DesktopSettingPage.tabKeys.indexOf(tab.key);
+          if (index < 0) return;
+          controller.jumpToPage(index);
+          selectedTab.value = tab.key;
+        },
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(translate(tab.label),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w400,
+                      color: selected ? palette.text : palette.secondary)),
+              const SizedBox(height: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                height: 3,
+                width: selected ? 20 : 0,
+                decoration: BoxDecoration(
+                    color: palette.accent,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
   }
 
   Widget _header(BuildContext context) {
@@ -544,7 +704,8 @@ class _GeneralState extends State<_General> {
   }
 
   Widget service() {
-    if (bind.isOutgoingOnly()) {
+    // Vega 修改：服务开关已放在「远程协助」页的「允许他人远程协助」，设置里不再重复。
+    if (bind.isOutgoingOnly() || vegaSettingsEmbedded) {
       return const Offstage();
     }
 
@@ -2663,9 +2824,14 @@ class _AboutState extends State<_About> {
               const SizedBox(
                 height: 8.0,
               ),
+              // Vega 修改：显示 Vega 产品版本，协议版本作为「基于 RustDesk」说明。
               SelectionArea(
-                  child: Text('${translate('Version')}: $version')
+                  child: Text(isWindows
+                          ? '${translate('Version')}: Vega ${bind.mainVegaVersion()}（基于 RustDesk $version）'
+                          : '${translate('Version')}: $version')
                       .marginSymmetric(vertical: 4.0)),
+              // Vega 修改：应用内检查更新（仅 Windows）。
+              if (isWindows) const VegaUpdateTile(),
               SelectionArea(
                   child: Text('${translate('Build Date')}: $buildDate')
                       .marginSymmetric(vertical: 4.0)),
@@ -2702,33 +2868,19 @@ class _AboutState extends State<_About> {
                     kVegaAboutLine,
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
-              Container(
-                decoration: const BoxDecoration(color: Color(0xFF2c8cff)),
-                padding:
-                    const EdgeInsets.symmetric(vertical: 24, horizontal: 8),
-                child: SelectionArea(
-                    child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.\n$license',
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                          Text(
-                            translate('Slogan_tip'),
-                            style: TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white),
-                          )
-                        ],
-                      ),
-                    ),
-                  ],
-                )),
-              ).marginSymmetric(vertical: 4.0)
+              // Vega 修改：版权声明按 AGPL 保留上游原文，改为低调的说明文字；
+              // 去掉上游口号横幅，避免暗示 RustDesk 背书。
+              Builder(builder: (context) {
+                final p = VegaColors.of(context);
+                return SelectionArea(
+                  child: Text(
+                    'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.（RustDesk 原作者）\n'
+                    'Vega 为其修改版，按 AGPL-3.0 发布。\n$license',
+                    style: TextStyle(
+                        fontSize: 12, height: 1.5, color: p.secondary),
+                  ),
+                ).marginOnly(top: 10, bottom: 4);
+              }),
             ],
           ).marginOnly(left: _kContentHMargin)
         ]),
@@ -2746,6 +2898,41 @@ Widget _Card(
     {required String title,
     required List<Widget> children,
     List<Widget>? title_suffix}) {
+  // Vega 修改：嵌入主界面时用扁平分组卡片（小标题 + 细边框），占满宽度。
+  if (vegaSettingsEmbedded) {
+    return Builder(builder: (context) {
+      final palette = VegaColors.of(context);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(children: [
+            Expanded(
+              child: Text(translate(title),
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: palette.secondary)),
+            ),
+            ...?title_suffix,
+          ]).marginOnly(left: 4, top: 18, bottom: 8),
+          Container(
+            padding: const EdgeInsets.fromLTRB(4, 8, 12, 10),
+            decoration: BoxDecoration(
+              color: palette.card,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: palette.separator, width: 0.8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children
+                  .map((e) => e.marginOnly(top: 2, bottom: 2))
+                  .toList(),
+            ),
+          ),
+        ],
+      ).marginSymmetric(horizontal: 24);
+    });
+  }
   return Row(
     children: [
       Flexible(
@@ -2824,6 +3011,41 @@ Widget _OptionCheckBox(
     enabled = false;
   }
 
+  if (vegaSettingsEmbedded) {
+    // Vega 修改：选项行 = 左侧文字 + 右侧开关。
+    final canChange = enabled && !isOptFixed;
+    return Obx(() => InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: canChange ? () => onChanged(!ref.value) : null,
+          child: SizedBox(
+            height: 38,
+            child: Row(children: [
+              // Expanded（而非 Flexible + Spacer）：两者各占一半剩余宽度，
+              // 开关会停在行中间；现在文字占满，开关贴右。
+              Expanded(
+                child: Row(children: [
+                  Flexible(
+                    child: Text(translate(label),
+                        style: TextStyle(
+                            fontSize: 14,
+                            color: disabledTextColor(context, enabled))),
+                  ),
+                  if (trailing != null) trailing,
+                ]),
+              ),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: ref.value,
+                  activeColor: Colors.white,
+                  activeTrackColor: VegaColors.of(context).accent,
+                  onChanged: canChange ? onChanged : null,
+                ),
+              ),
+            ]).marginOnly(left: 12),
+          ),
+        ));
+  }
   return GestureDetector(
     child: Obx(
       () => Row(
@@ -2886,7 +3108,7 @@ Widget _Radio<T>(BuildContext context,
           child: Text(translate(label),
                   overflow: autoNewLine ? null : TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: _kContentFontSize,
+                      fontSize: vegaSettingsEmbedded ? 14 : _kContentFontSize,
                       color: disabledTextColor(context, onChange2 != null)))
               .marginOnly(left: 5),
         ),

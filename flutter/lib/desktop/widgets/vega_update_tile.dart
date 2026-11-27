@@ -1,0 +1,360 @@
+// Vega 新增文件（AGPL-3.0，基于 RustDesk 1.5.3 修改版）：
+// 设置 → 关于 页的「检查更新」行。后端状态机在 src/vega_update.rs，
+// 经 main_vega_update_* 四个 FFI 入口驱动；本组件只轮询状态并渲染。
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
+import 'package:flutter_hbb/vega_changelog.dart';
+import 'package:flutter_hbb/vega_shot.dart';
+import 'package:flutter_hbb/vega_theme.dart';
+
+class VegaUpdateTile extends StatefulWidget {
+  const VegaUpdateTile({super.key, this.checkOnly = false});
+
+  /// 被远程控制时只允许检查，不显示安装入口（断开后再安装）。
+  final bool checkOnly;
+
+  @override
+  State<VegaUpdateTile> createState() => _VegaUpdateTileState();
+}
+
+class _VegaUpdateTileState extends State<VegaUpdateTile> {
+  String _phase = 'idle';
+  String _version = '';
+  String _notes = '';
+  String _error = '';
+  // 上次更新的结果（重启后读一次）：'' / 'ok' / 'failed'
+  String _pending = '';
+  String _pendingVersion = '';
+  Timer? _timer;
+  bool _fastTimer = false;
+
+  static const _busy = {'checking', 'downloading', 'installing'};
+
+  @override
+  void initState() {
+    super.initState();
+    // 锁定卡里不读取上次安装结果：后端读取即删除，留给「关于」页显示。
+    if (!widget.checkOnly) _readPending();
+    _readState();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Map<String, dynamic> _decode(String s) {
+    try {
+      final v = jsonDecode(s);
+      if (v is Map<String, dynamic>) return v;
+    } catch (_) {}
+    return const {};
+  }
+
+  void _readPending() {
+    try {
+      final m = _decode(bind.mainVegaUpdatePending());
+      final r = (m['result'] ?? 'none').toString();
+      if (r == 'ok' || r == 'failed') {
+        _pending = r;
+        _pendingVersion = (m['version'] ?? '').toString();
+      }
+    } catch (_) {}
+  }
+
+  void _readState() {
+    Map<String, dynamic> m;
+    try {
+      m = _decode(bind.mainVegaUpdateState());
+    } catch (_) {
+      m = const {};
+    }
+    if (!mounted) return;
+    var phase = (m['phase'] ?? 'idle').toString();
+    var version = (m['version'] ?? '').toString();
+    var notes = (m['notes'] ?? '').toString();
+    final error = (m['error'] ?? '').toString();
+    // CI 截图：模拟「发现新版本」，检查这个状态下页面能正常显示。
+    if (vegaShotEnv('VEGA_SHOT_UPD') == '1') {
+      phase = 'available';
+      version = '0.7.9';
+      notes = '· 这是截图用的示例更新说明';
+    }
+    if (phase != _phase ||
+        version != _version ||
+        notes != _notes ||
+        error != _error) {
+      setState(() {
+        _phase = phase;
+        _version = version;
+        _notes = notes;
+        _error = error;
+      });
+    }
+    // 忙时快轮询；空闲时慢轮询，跟上后台自动检查的结果。
+    final fast = _busy.contains(_phase);
+    if (_timer == null || fast != _fastTimer) {
+      _timer?.cancel();
+      _fastTimer = fast;
+      _timer = Timer.periodic(
+          Duration(milliseconds: fast ? 700 : 3000), (_) => _readState());
+    }
+  }
+
+  void _check() {
+    _pending = '';
+    bind.mainVegaUpdateCheck();
+    _readState();
+  }
+
+  void _install() {
+    if (widget.checkOnly) return;
+    bind.mainVegaUpdateInstall();
+    _readState();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = VegaColors.of(context);
+    final busy = _busy.contains(_phase);
+
+    String title;
+    String? subtitle;
+    Color dot = p.secondary;
+    // 升级后首次打开时，「已是最新」或后台检查失败都让位给上次安装结果的提示。
+    final viewPhase =
+        (_pending.isNotEmpty &&
+                (_phase == 'latest' || (_phase == 'error' && _version.isEmpty)))
+            ? 'idle'
+            : _phase;
+    switch (viewPhase) {
+      case 'checking':
+        title = '正在检查更新…';
+        break;
+      case 'latest':
+        title = '已是最新版本';
+        dot = const Color(0xFF34C759);
+        break;
+      case 'available':
+        title = '发现新版本 $_version';
+        subtitle = widget.checkOnly
+            ? '断开远程后可安装'
+            : (_notes.isEmpty ? null : _notes);
+        dot = p.accent;
+        break;
+      case 'downloading':
+        title = '正在下载 $_version…';
+        dot = p.accent;
+        break;
+      case 'installing':
+        title = '正在安装，完成后会自动重启';
+        subtitle = '如弹出系统授权窗口，请点「是」';
+        dot = p.accent;
+        break;
+      case 'error':
+        title = _version.isNotEmpty ? '更新 $_version 没有成功' : '检查更新失败';
+        subtitle = _error.isEmpty ? null : _error;
+        dot = const Color(0xFFFF453A);
+        break;
+      default:
+        if (_pending == 'ok') {
+          title = '已更新到 $_pendingVersion';
+          final items = vegaChangelogFor(_pendingVersion);
+          if (items.isNotEmpty) subtitle = items.map((e) => '· $e').join('\n');
+          dot = const Color(0xFF34C759);
+        } else if (_pending == 'failed') {
+          title = '上次更新到 $_pendingVersion 没有生效';
+          subtitle = '可以再检查一次';
+          dot = const Color(0xFFFF453A);
+        } else {
+          title = '软件更新';
+        }
+    }
+
+    Widget action;
+    if (busy) {
+      action = SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
+      );
+    } else if (!widget.checkOnly &&
+        (_phase == 'available' ||
+            (_phase == 'error' && _version.isNotEmpty))) {
+      action = _AuroraButton(
+          label: _phase == 'available' ? '立即更新' : '重试', onTap: _install);
+    } else {
+      action = _PlainButton(label: '检查更新', onTap: _check);
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: p.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: p.separator),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: p.text)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 3),
+                  // 更新说明未签名，只按纯文本显示，最多 8 行。
+                  Text(subtitle,
+                      maxLines: 8,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: p.secondary)),
+                ],
+                const SizedBox(height: 4),
+                MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _showChangelog(context),
+                    child: Text('更新日志',
+                        style: TextStyle(fontSize: 12, color: p.accent)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          action,
+        ],
+      ),
+    );
+  }
+}
+
+class _AuroraButton extends StatelessWidget {
+  const _AuroraButton({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: VegaColors.aurora,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white)),
+        ),
+      ),
+    );
+  }
+}
+
+void _showChangelog(BuildContext context) {
+  final p = VegaColors.of(context);
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 520),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('更新日志',
+                  style: TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final r in vegaChangelog) ...[
+                        Text('Vega ${r.version}  ·  ${r.date}',
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: p.text)),
+                        const SizedBox(height: 6),
+                        for (final it in r.items)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('· $it',
+                                style: TextStyle(
+                                    fontSize: 13, color: p.secondary)),
+                          ),
+                        const SizedBox(height: 12),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: _PlainButton(
+                    label: '关闭', onTap: () => Navigator.of(ctx).pop()),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _PlainButton extends StatelessWidget {
+  const _PlainButton({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = VegaColors.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: p.accent.withOpacity(0.6)),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: p.accent)),
+        ),
+      ),
+    );
+  }
+}

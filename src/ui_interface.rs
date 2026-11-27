@@ -21,7 +21,10 @@ use serde_derive::Serialize;
 use std::process::Child;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use crate::common::SOFTWARE_UPDATE_URL;
@@ -86,6 +89,14 @@ lazy_static::lazy_static! {
     pub static ref IS_FILE_TRANSFER_ENABLED: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
 }
 
+/// Vega 修改：安装失败或 UAC 取消后由界面取走，用于恢复安装按钮
+static VEGA_INSTALL_FAILED: std::sync::atomic::AtomicBool = AtomicBool::new(false);
+
+/// Vega 修改：取出并清除“安装失败”标记（界面轮询一次即复位）
+pub fn take_install_failed() -> bool {
+    VEGA_INSTALL_FAILED.swap(false, Ordering::SeqCst)
+}
+
 const INIT_ASYNC_JOB_STATUS: &str = " ";
 
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
@@ -105,10 +116,16 @@ pub fn goto_install() {
 
 #[inline]
 pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) {
+    // Vega 修改：每次重新发起安装先清掉上一次的失败标记
+    VEGA_INSTALL_FAILED.store(false, Ordering::SeqCst);
     #[cfg(windows)]
     std::thread::spawn(move || {
+        // Vega 修改：flutter 下 UAC 取消或安装失败时保留窗口，用户可再点安装；
+        // sciter 界面没有失败轮询，保持旧行为直接退出进程，避免卡在安装页
         if let Err(err) = crate::platform::windows::install_me(&_options, _path, _silent, _debug) {
             log::error!("Installation failed: {err:#}");
+            // Vega 修改：通知界面恢复安装按钮
+            VEGA_INSTALL_FAILED.store(true, Ordering::SeqCst);
             if !_silent
                 && !err
                     .downcast_ref::<::windows::core::Error>()
@@ -118,6 +135,11 @@ pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) 
             {
                 crate::platform::windows::message_box(&format!("Installation failed:\n{err:#}!"));
             }
+            // Vega 修改：sciter 界面不轮询失败标记，保持旧行为退出；flutter 界面返回后由轮询恢复
+            #[cfg(feature = "flutter")]
+            return;
+            #[cfg(not(feature = "flutter"))]
+            std::process::exit(0);
         }
         std::process::exit(0);
     });

@@ -1,14 +1,17 @@
+import '../../vega_shot.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_update_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
@@ -67,6 +70,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     // Vega 修改：主界面改为单屏——品牌栏、横幅、本设备 + 远程控制两张卡、设备列表。
     // 仅「被控端」定制包仍沿用左侧窄栏。
     if (!isIncomingOnly) {
+      return _buildBlock(child: buildVegaShell(context));
+    }
+    if (!isIncomingOnly) {
       final isOutgoingOnly = bind.isOutgoingOnly();
       return _buildBlock(
         child: ConnectionPage(
@@ -98,6 +104,488 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
       ],
     ));
+  }
+
+  /// Vega 修改：主界面 = 左侧栏 + 内容区（结构参考 UU 远程）：
+  /// 远程协助（本设备 + 远程控制）/ 我的设备 / 设置。
+  Widget buildVegaShell(BuildContext context) {
+    vegaSettingsEmbedded = true;
+    final palette = VegaColors.of(context);
+    final isOutgoingOnly = bind.isOutgoingOnly();
+    final pages = <Widget>[
+      ConnectionPage(
+        vegaStacked: true,
+        header: _vegaPageTitle(palette, isOutgoingOnly ? '远程控制' : '远程协助',
+            isOutgoingOnly ? '输入对方的设备 ID 即可连接' : '把 ID 和密码发给对方，或者输入对方的 ID 去连接'),
+        banner: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const VegaUpdateBanner(),
+            if (!isOutgoingOnly) buildPresetPasswordWarning(),
+            Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),
+          ],
+        ),
+        deviceCard: isOutgoingOnly
+            ? null
+            : ChangeNotifierProvider.value(
+                value: gFFI.serverModel,
+                child: buildAssistCard(context),
+              ),
+      ),
+      Container(
+        color: palette.bg,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _vegaPageTitle(palette, '我的设备', '最近连接、收藏和局域网里的设备，双击即可连接'),
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+                padding: const EdgeInsets.fromLTRB(10, 4, 6, 0),
+                decoration: BoxDecoration(
+                  color: palette.card,
+                  borderRadius: BorderRadius.circular(palette.radius),
+                  border: Border.all(color: palette.separator, width: 0.8),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: PeerTabPage(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      DesktopSettingPage(
+          // Vega：CI 截图用，VEGA_SHOT_ABOUT=1 时设置页直接打开「关于」。
+          initialTabkey: vegaShotEnv('VEGA_SHOT_ABOUT') == '1'
+              ? SettingsTabKey.about
+              : SettingsTabKey.general,
+          vegaEmbedded: true),
+    ];
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        buildVegaSidebar(context, palette),
+        VerticalDivider(width: 1, thickness: 1, color: palette.separator),
+        Expanded(
+          child: Obx(() {
+            final current = vegaNavIndex.value;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                for (var i = 0; i < pages.length; i++)
+                  Offstage(
+                    offstage: i != current,
+                    child: TickerMode(
+                      enabled: i == current,
+                      child: AnimatedOpacity(
+                        opacity: i == current ? 1 : 0,
+                        duration: const Duration(milliseconds: 160),
+                        curve: Curves.easeOut,
+                        child: pages[i],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _vegaPageTitle(VegaPalette palette, String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 24, 24, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: palette.text)),
+          const SizedBox(height: 4),
+          Text(subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: palette.secondary)),
+        ],
+      ),
+    );
+  }
+
+  Widget buildVegaSidebar(BuildContext context, VegaPalette palette) {
+    final dark = palette.brightness == Brightness.dark;
+    Widget item(int index, IconData icon, IconData selectedIcon, String label) {
+      return Obx(() {
+        final selected = vegaNavIndex.value == index;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          child: Material(
+            color: selected
+                ? palette.accent.withOpacity(dark ? 0.18 : 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => vegaNavIndex.value = index,
+              child: SizedBox(
+                height: 40,
+                child: Row(
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOutCubic,
+                      width: 3,
+                      height: selected ? 18 : 0,
+                      decoration: BoxDecoration(
+                        color: palette.accent,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Icon(selected ? selectedIcon : icon,
+                        size: 19,
+                        color: selected ? palette.accent : palette.secondary),
+                    const SizedBox(width: 10),
+                    Text(label,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w400,
+                          color: selected ? palette.accent : palette.text,
+                        )),
+                    if (index == 2 &&
+                        vegaUpdateAvailable.value.isNotEmpty)
+                      Container(
+                        width: 7,
+                        height: 7,
+                        margin: const EdgeInsets.only(left: 6),
+                        decoration: const BoxDecoration(
+                            color: Color(0xFFFF453A), shape: BoxShape.circle),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      });
+    }
+
+    return Container(
+      width: 188,
+      color: dark ? const Color(0xFF111019) : const Color(0xFFEDECF5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 20, 12, 18),
+            child: Row(
+              children: [
+                const VegaMark(size: 28),
+                const SizedBox(width: 10),
+                Text('Vega',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: palette.text)),
+              ],
+            ),
+          ),
+          item(0, Icons.screen_share_outlined, Icons.screen_share_rounded,
+              bind.isOutgoingOnly() ? '远程控制' : '远程协助'),
+          item(1, Icons.devices_outlined, Icons.devices_rounded, '我的设备'),
+          const Spacer(),
+          if (!bind.isOutgoingOnly())
+            ClipRect(child: OnlineStatusWidget().marginOnly(left: 6, bottom: 4)),
+          Divider(height: 1, thickness: 1, color: palette.separator)
+              .marginSymmetric(horizontal: 12),
+          const SizedBox(height: 6),
+          if (!bind.isDisableSettings())
+            item(2, Icons.settings_outlined, Icons.settings_rounded, '设置'),
+          const SizedBox(height: 10),
+        ],
+      ),
+    );
+  }
+
+  /// Vega 修改：「本设备」卡片（参考 UU）：允许远程协助开关、本设备 ID、验证方式、复制并分享。
+  Widget buildAssistCard(BuildContext context) {
+    final palette = VegaColors.of(context);
+    return Consumer<ServerModel>(builder: (context, model, child) {
+      final method = model.verificationMethod;
+      final showOneTime =
+          model.approveMode != 'click' && method != kUsePermanentPassword;
+      final pwdText = model.serverPasswd.text.trim();
+      final pwdReady = showOneTime &&
+          pwdText.isNotEmpty &&
+          pwdText != '-' &&
+          pwdText != translate('Generating ...');
+      final idText = model.serverId.text;
+      final labelStyle = TextStyle(fontSize: 12, color: palette.secondary);
+      void copy(String text) {
+        Clipboard.setData(ClipboardData(text: text));
+        showToast(translate('Copied'));
+      }
+
+      const methods = [
+        kUseTemporaryPassword,
+        kUsePermanentPassword,
+        kUseBothPasswords,
+      ];
+      const methodLabels = ['仅使用临时密码', '仅使用固定密码', '临时和固定密码都可用'];
+      final methodLabel = model.approveMode == 'click'
+          ? '对方连接时由我确认'
+          : methodLabels[methods.indexOf(method)];
+
+      Future<void> pickMethod(String value) async {
+        if (value == '_set') {
+          setPasswordDialog();
+          return;
+        }
+        Future<void> apply() async {
+          await model.setVerificationMethod(value);
+          await model.updatePasswordModel();
+        }
+
+        if (value == kUsePermanentPassword &&
+            (await bind.mainGetCommon(key: 'permanent-password-set')) !=
+                'true' &&
+            !isChangePermanentPasswordDisabled()) {
+          setPasswordDialog(notEmptyCallback: apply);
+        } else {
+          await apply();
+        }
+      }
+
+      final methodMenu = PopupMenuButton<String>(
+        tooltip: '验证方式',
+        offset: const Offset(0, 30),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        color: palette.card,
+        onSelected: pickMethod,
+        enabled: model.approveMode != 'click' && !bind.isDisableSettings(),
+        itemBuilder: (context) => [
+          for (var i = 0; i < methods.length; i++)
+            PopupMenuItem<String>(
+              value: methods[i],
+              height: 38,
+              child: Row(children: [
+                SizedBox(
+                  width: 18,
+                  child: methods[i] == method
+                      ? Icon(Icons.check_rounded,
+                          size: 16, color: palette.accent)
+                      : null,
+                ),
+                const SizedBox(width: 6),
+                Text(methodLabels[i],
+                    style: TextStyle(fontSize: 13, color: palette.text)),
+              ]),
+            ),
+          const PopupMenuDivider(height: 8),
+          PopupMenuItem<String>(
+            value: '_set',
+            height: 38,
+            enabled: !isChangePermanentPasswordDisabled(),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 24),
+              child: Text('设置固定密码…',
+                  style: TextStyle(fontSize: 13, color: palette.text)),
+            ),
+          ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('验证方式：$methodLabel', style: labelStyle),
+            Icon(Icons.expand_more_rounded, size: 16, color: palette.secondary),
+          ]),
+        ),
+      );
+
+      return Container(
+        decoration: BoxDecoration(
+          color: palette.card,
+          borderRadius: BorderRadius.circular(palette.radius),
+          border: Border.all(color: palette.separator, width: 0.8),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF2B2378).withOpacity(0.06),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 12, 10),
+              child: Row(
+                children: [
+                  Text('本设备',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: palette.text)),
+                  const SizedBox(width: 4),
+                  buildCardIconButton(
+                    context: context,
+                    icon: Icons.qr_code_2_rounded,
+                    tooltip: '手机扫码配置',
+                    onTap: showVegaQrDialog,
+                  ),
+                  const Spacer(),
+                  Text('允许他人远程协助',
+                      style: TextStyle(fontSize: 13, color: palette.text)),
+                  const SizedBox(width: 6),
+                  Obx(() => Switch(
+                        value: !svcStopped.value,
+                        activeColor: Colors.white,
+                        activeTrackColor: palette.accent,
+                        onChanged: (v) => start_service(v),
+                      )),
+                ],
+              ),
+            ),
+            Divider(height: 1, thickness: 0.8, color: palette.separator),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    flex: 9,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('本设备 ID', style: labelStyle),
+                        const SizedBox(height: 4),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => copy(idText),
+                          child: Tooltip(
+                            message: '点击复制',
+                            child: Text(
+                              idText.isEmpty ? '— — —' : idText,
+                              maxLines: 1,
+                              overflow: TextOverflow.fade,
+                              softWrap: false,
+                              style: TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1,
+                                height: 1.2,
+                                color: palette.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 10,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        methodMenu,
+                        const SizedBox(height: 2),
+                        SizedBox(
+                          height: 34,
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: pwdReady ? () => copy(pwdText) : null,
+                                  child: Text(
+                                    !showOneTime
+                                        ? (model.approveMode == 'click'
+                                            ? '对方发起后在弹窗里确认'
+                                            : '用固定密码连接')
+                                        : (_obscurePassword
+                                            ? '••••••'
+                                            : (pwdText.isEmpty
+                                                ? '—'
+                                                : pwdText)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.fade,
+                                    softWrap: false,
+                                    style: TextStyle(
+                                      fontSize: showOneTime ? 20 : 14,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: showOneTime ? 2 : 0,
+                                      fontFamily:
+                                          showOneTime ? 'monospace' : null,
+                                      fontFamilyFallback: showOneTime
+                                          ? const ['Menlo', 'Consolas']
+                                          : null,
+                                      color: palette.text,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (showOneTime)
+                                buildCardIconButton(
+                                  context: context,
+                                  icon: _obscurePassword
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                  tooltip: _obscurePassword
+                                      ? translate('Show Password')
+                                      : translate('Hide Password'),
+                                  onTap: () => setState(() =>
+                                      _obscurePassword = !_obscurePassword),
+                                ),
+                              if (showOneTime)
+                                AnimatedRotationWidget(
+                                  onPressed: () =>
+                                      bind.mainUpdateTemporaryPassword(),
+                                  child: Tooltip(
+                                    message: translate('Refresh Password'),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(6),
+                                      child: Icon(Icons.refresh_rounded,
+                                          size: 18, color: palette.secondary),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => copy(pwdReady
+                        ? '设备 ID：$idText\n临时密码：$pwdText'
+                        : idText),
+                    icon: const Icon(Icons.ios_share_rounded, size: 16),
+                    label: const Text('复制并分享'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: palette.accent,
+                      side: BorderSide(color: palette.separator),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   Widget _buildBlock({required Widget child}) {
@@ -313,7 +801,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       borderRadius: BorderRadius.circular(8),
                       onTap: () => copy(idText),
                       child: Tooltip(
-                        message: translate('Copy'),
+                        message: '点击复制',
                         child: Text(
                           idText.isEmpty ? '— — —' : idText,
                           maxLines: 1,
@@ -921,6 +1409,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
+    vegaStartAutoUpdateCheck();
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();
@@ -971,6 +1460,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     });
     Get.put<RxBool>(svcStopped, tag: 'stop-service');
+    // Vega：CI 截图用，VEGA_SHOT_NAV=0/1/2 直接打开对应页面。
+    final shotNav = int.tryParse(vegaShotEnv('VEGA_SHOT_NAV') ?? '');
+    if (shotNav != null && shotNav >= 0 && shotNav <= 2) {
+      vegaNavIndex.value = shotNav;
+    }
     rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
 
     screenToMap(window_size.Screen screen) => {
@@ -1353,7 +1847,7 @@ String vegaCardTitle(String content) {
   switch (content) {
     case 'install_tip':
     case '':
-      return '安装到本机更稳定';
+      return '安装 Vega，让对方随时连得上';
     case 'install_daemon_tip':
       return '安装系统服务';
     default:
@@ -1364,7 +1858,7 @@ String vegaCardTitle(String content) {
 String vegaCardBody(String content) {
   switch (content) {
     case 'install_tip':
-      return '当前是免安装运行，对方遇到管理员窗口或 UAC 弹窗会无法操作。安装后支持开机自启和无人值守。';
+      return '安装后开机自启、支持无人值守，对方遇到管理员窗口和 UAC 弹窗也能正常操作。';
     default:
       return translate(content);
   }

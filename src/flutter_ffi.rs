@@ -715,6 +715,13 @@ pub fn session_send_chat(session_id: SessionID, text: String) {
     }
 }
 
+// Vega: ask the connected peer to wake a device in its own LAN.
+pub fn session_vega_wake(session_id: SessionID, target_id: String) {
+    if let Some(s) = sessions::get_session_by_session_id(&session_id) {
+        s.vega_wake(target_id);
+    }
+}
+
 // Terminal functions
 pub fn session_open_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
@@ -2249,7 +2256,7 @@ pub fn main_get_mouse_time() -> f64 {
 pub fn main_wol(id: String) {
     // TODO: move send_wol outside.
     #[cfg(not(any(target_os = "ios")))]
-    crate::lan::send_wol(id)
+    let _ = crate::lan::send_wol(id);
 }
 
 pub fn main_create_shortcut(_id: String) {
@@ -2447,6 +2454,59 @@ pub fn main_update_me() -> SyncReturn<bool> {
     SyncReturn(true)
 }
 
+pub fn main_vega_update_check() -> SyncReturn<bool> {
+    // crate::vega_update 仅在 Windows 编译，函数本身保持无条件导出，由体内 cfg 分流
+    #[cfg(windows)]
+    {
+        crate::vega_update::ui_start_check();
+        SyncReturn(true)
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(false)
+    }
+}
+
+pub fn main_vega_update_install() -> SyncReturn<bool> {
+    #[cfg(windows)]
+    {
+        crate::vega_update::ui_start_install();
+        SyncReturn(true)
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(false)
+    }
+}
+
+pub fn main_vega_update_state() -> SyncReturn<String> {
+    #[cfg(windows)]
+    {
+        SyncReturn(crate::vega_update::ui_state_json())
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(
+            r#"{"phase":"error","version":"","notes":"","error":"仅支持 Windows"}"#.to_owned(),
+        )
+    }
+}
+
+pub fn main_vega_update_pending() -> SyncReturn<String> {
+    #[cfg(windows)]
+    {
+        SyncReturn(crate::vega_update::ui_pending_json())
+    }
+    #[cfg(not(windows))]
+    {
+        SyncReturn(r#"{"result":"none"}"#.to_owned())
+    }
+}
+
+pub fn main_vega_version() -> SyncReturn<String> {
+    SyncReturn(crate::VEGA_VERSION.to_owned())
+}
+
 pub fn set_cur_session_id(session_id: SessionID) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         set_cur_session_id_(session_id, &session.get_keyboard_mode())
@@ -2469,6 +2529,11 @@ pub fn install_run_without_install() {
 
 pub fn install_install_me(options: String, path: String) {
     install_me(options, path, false, false);
+}
+
+// Vega 修改：界面取走安装失败/UAC 取消标记，用于恢复安装按钮
+pub fn install_take_failed() -> SyncReturn<bool> {
+    SyncReturn(take_install_failed())
 }
 
 pub fn install_install_path() -> SyncReturn<String> {

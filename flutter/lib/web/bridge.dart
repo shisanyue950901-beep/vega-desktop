@@ -551,6 +551,11 @@ class RustdeskImpl {
         () => js.context.callMethod('setByName', ['send_chat', text]));
   }
 
+  void sessionVegaWake(
+      {required UuidValue sessionId,
+      required String targetId,
+      dynamic hint}) {}
+
   Future<void> sessionPeerOption(
       {required UuidValue sessionId,
       required String name,
@@ -1616,6 +1621,22 @@ class RustdeskImpl {
     throw UnimplementedError("mainUpdateMe");
   }
 
+  bool mainVegaUpdateCheck({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateCheck");
+  }
+
+  bool mainVegaUpdateInstall({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateInstall");
+  }
+
+  String mainVegaUpdateState({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdateState");
+  }
+
+  String mainVegaUpdatePending({dynamic hint}) {
+    throw UnimplementedError("mainVegaUpdatePending");
+  }
+
   Future<void> setCurSessionId({required UuidValue sessionId, dynamic hint}) {
     throw UnimplementedError("setCurSessionId");
   }
@@ -1626,6 +1647,14 @@ class RustdeskImpl {
 
   Future<void> installRunWithoutInstall({dynamic hint}) {
     throw UnimplementedError("installRunWithoutInstall");
+  }
+
+  String mainVegaVersion({dynamic hint}) {
+    throw UnimplementedError("mainVegaVersion");
+  }
+
+  bool installTakeFailed({dynamic hint}) {
+    throw UnimplementedError("installTakeFailed");
   }
 
   Future<void> installInstallMe(

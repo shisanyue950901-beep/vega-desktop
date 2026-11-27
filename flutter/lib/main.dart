@@ -1,15 +1,18 @@
+import 'vega_shot.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:bot_toast/bot_toast.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_control_center.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
@@ -36,6 +39,7 @@ WindowType? kWindowType;
 late List<String> kBootArgs;
 
 Future<void> main(List<String> args) async {
+  vegaInstallErrorWidget();
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -112,6 +116,21 @@ Future<void> main(List<String> args) async {
     windowManager.setPreventClose(true);
     if (isMacOS) {
       disableWindowMovable(kWindowId);
+    }
+    // Vega：CI 截图用，VEGA_SHOT_CC=1 展开 / 2 收起，预览远程窗口的控制中心。
+    final shotCc = vegaShotEnv('VEGA_SHOT_CC');
+    if (shotCc == '1' || shotCc == '2') {
+      await initEnv(kAppTypeMain);
+      _runApp('', VegaControlCenterPreview(expanded: shotCc == '1'),
+          MyTheme.currentThemeMode());
+      windowManager.waitUntilReadyToShow(
+          getHiddenTitleBarWindowOptions(size: const Size(1000, 640)),
+          () async {
+        await windowManager.show();
+        await windowManager.focus();
+        await windowManager.setOpacity(1);
+      });
+      return;
     }
     runMainApp(true);
   }
@@ -281,6 +300,7 @@ void runMultiWindow(
   // show window from hidden status
   WindowController.fromWindowId(kWindowId!).show();
 }
+
 
 void runConnectionManagerScreen() async {
   await initEnv(kAppTypeConnectionManager);
@@ -592,4 +612,45 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
+}
+
+/// Vega：发布版里页面出错时不再只显示灰块，改为显示错误原因（便于用户截图反馈）。
+/// 不依赖任何祖先（Directionality/Material），所有窗口入口都生效。
+void vegaInstallErrorWidget() {
+  if (!kReleaseMode) return;
+  ErrorWidget.builder = (details) {
+    String msg;
+    try {
+      msg = details.exceptionAsString();
+    } catch (_) {
+      msg = '未知错误';
+    }
+    if (msg.length > 600) msg = msg.substring(0, 600);
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 160, maxWidth: 640),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF4F4),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFFC9C6)),
+            ),
+            child: Text(
+              '这部分页面出错了，请截图发给开发者：\n$msg',
+              overflow: TextOverflow.fade,
+              style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFB3261E),
+                  decoration: TextDecoration.none),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
 }

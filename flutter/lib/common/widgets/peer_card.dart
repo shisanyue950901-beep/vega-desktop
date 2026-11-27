@@ -489,7 +489,23 @@ class _PeerCardState extends State<_PeerCard>
         return checkbox.marginOnly(right: right);
       }
     } else {
-      return isWebDesktop ? _actionMoreWeb(peer) : _actionMore(peer);
+      if (isWebDesktop) return _actionMoreWeb(peer);
+      // Vega 修改：设备卡片上直接放「文件传输」按钮，一键打开。
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Tooltip(
+          message: '文件传输',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => connect(context, peer.id, isFileTransfer: true),
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(Icons.folder_copy_outlined,
+                  size: 18, color: MyTheme.accent),
+            ),
+          ),
+        ),
+        _actionMore(peer),
+      ]);
     }
   }
 

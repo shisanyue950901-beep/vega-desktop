@@ -202,7 +202,7 @@ class _PeersViewState extends State<_PeersView>
                 ).paddingOnly(bottom: 10),
                 Text(
                   widget.peers.loadEvent == LoadEvent.recent
-                      ? '还没有连接记录\n在上方输入伙伴 ID 开始第一次连接'
+                      ? '还没有连接记录\n去「远程协助」输入对方的设备 ID，连接过的电脑会出现在这里'
                       : translate(
                           _emptyMessages[widget.peers.loadEvent] ?? 'Empty',
                         ),
