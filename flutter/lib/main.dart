@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:bot_toast/bot_toast.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
@@ -38,6 +39,7 @@ WindowType? kWindowType;
 late List<String> kBootArgs;
 
 Future<void> main(List<String> args) async {
+  vegaInstallErrorWidget();
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -373,33 +375,6 @@ void _runApp(
   Widget home,
   ThemeMode themeMode,
 ) {
-  // Vega：发布版里页面出错时不再只显示灰块，改为显示错误原因（便于用户截图反馈）。
-  if (kReleaseMode) {
-    ErrorWidget.builder = (details) => Align(
-          alignment: Alignment.topLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 160),
-            child: Container(
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF4F4),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFFC9C6)),
-              ),
-              child: SingleChildScrollView(
-                child: Text(
-                  '这部分页面出错了，请截图发给开发者：\n${details.exceptionAsString()}',
-                  style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFFB3261E),
-                      decoration: TextDecoration.none),
-                ),
-              ),
-            ),
-          ),
-        );
-  }
   final botToastBuilder = BotToastInit();
   runApp(RefreshWrapper(
     builder: (context) => GetMaterialApp(
@@ -637,4 +612,45 @@ Widget keyListenerBuilder(BuildContext context, Widget? child) {
       }
     },
   );
+}
+
+/// Vega：发布版里页面出错时不再只显示灰块，改为显示错误原因（便于用户截图反馈）。
+/// 不依赖任何祖先（Directionality/Material），所有窗口入口都生效。
+void vegaInstallErrorWidget() {
+  if (!kReleaseMode) return;
+  ErrorWidget.builder = (details) {
+    String msg;
+    try {
+      msg = details.exceptionAsString();
+    } catch (_) {
+      msg = '未知错误';
+    }
+    if (msg.length > 600) msg = msg.substring(0, 600);
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 160, maxWidth: 640),
+          child: Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF4F4),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFFC9C6)),
+            ),
+            child: Text(
+              '这部分页面出错了，请截图发给开发者：\n$msg',
+              overflow: TextOverflow.fade,
+              style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFB3261E),
+                  decoration: TextDecoration.none),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
 }

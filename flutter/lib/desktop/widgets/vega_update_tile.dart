@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/vega_changelog.dart';
 import 'package:flutter_hbb/vega_shot.dart';
+import 'package:flutter_hbb/desktop/widgets/vega_update_notice.dart';
 import 'package:flutter_hbb/vega_theme.dart';
 
 class VegaUpdateTile extends StatefulWidget {
@@ -29,6 +30,7 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
   String _pending = '';
   String _pendingVersion = '';
   Timer? _timer;
+  bool _fastTimer = false;
 
   static const _busy = {'checking', 'downloading', 'installing'};
 
@@ -38,12 +40,6 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
     // 锁定卡里不读取上次安装结果：后端读取即删除，留给「关于」页显示。
     if (!widget.checkOnly) _readPending();
     _readState();
-    // CI 截图：模拟「发现新版本」，检查这个状态下页面能正常显示。
-    if (vegaShotEnv('VEGA_SHOT_UPD') == '1') {
-      _phase = 'available';
-      _version = '0.7.9';
-      _notes = '· 这是截图用的示例更新说明';
-    }
   }
 
   @override
@@ -79,18 +75,35 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
       m = const {};
     }
     if (!mounted) return;
-    setState(() {
-      _phase = (m['phase'] ?? 'idle').toString();
-      _version = (m['version'] ?? '').toString();
-      _notes = (m['notes'] ?? '').toString();
-      _error = (m['error'] ?? '').toString();
-    });
-    if (_busy.contains(_phase)) {
-      _timer ??= Timer.periodic(
-          const Duration(milliseconds: 700), (_) => _readState());
-    } else {
+    var phase = (m['phase'] ?? 'idle').toString();
+    var version = (m['version'] ?? '').toString();
+    var notes = (m['notes'] ?? '').toString();
+    final error = (m['error'] ?? '').toString();
+    // CI 截图：模拟「发现新版本」，检查这个状态下页面能正常显示。
+    if (vegaShotEnv('VEGA_SHOT_UPD') == '1') {
+      phase = 'available';
+      version = '0.7.9';
+      notes = '· 这是截图用的示例更新说明';
+    }
+    if (!widget.checkOnly) vegaSyncUpdateNotice(phase, version, notes);
+    if (phase != _phase ||
+        version != _version ||
+        notes != _notes ||
+        error != _error) {
+      setState(() {
+        _phase = phase;
+        _version = version;
+        _notes = notes;
+        _error = error;
+      });
+    }
+    // 忙时快轮询；空闲时慢轮询，跟上后台自动检查的结果。
+    final fast = _busy.contains(_phase);
+    if (_timer == null || fast != _fastTimer) {
       _timer?.cancel();
-      _timer = null;
+      _fastTimer = fast;
+      _timer = Timer.periodic(
+          Duration(milliseconds: fast ? 700 : 3000), (_) => _readState());
     }
   }
 
@@ -114,7 +127,10 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
     String title;
     String? subtitle;
     Color dot = p.secondary;
-    switch (_phase) {
+    // 升级后首次打开时，「已是最新」让位给上次安装结果的提示。
+    final viewPhase =
+        (_pending.isNotEmpty && _phase == 'latest') ? 'idle' : _phase;
+    switch (viewPhase) {
       case 'checking':
         title = '正在检查更新…';
         break;

@@ -256,7 +256,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                               selected ? FontWeight.w600 : FontWeight.w400,
                           color: selected ? palette.accent : palette.text,
                         )),
-                    if (index == 2 && vegaUpdateAvailable.value.isNotEmpty)
+                    if (index == 2 &&
+                        vegaUpdateAvailable.value.isNotEmpty)
                       Container(
                         width: 7,
                         height: 7,

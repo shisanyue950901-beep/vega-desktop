@@ -38,19 +38,7 @@ void _apply(Map<String, dynamic> m) {
   }
 }
 
-void _checkOnce() {
-  final phase = (_state()['phase'] ?? 'idle').toString();
-  // 正在检查/下载/安装，或已经发现新版本时不重复检查。
-  if (const {'checking', 'downloading', 'installing', 'available'}
-      .contains(phase)) {
-    _apply(_state());
-    return;
-  }
-  try {
-    bind.mainVegaUpdateCheck();
-  } catch (_) {
-    return;
-  }
+void _pollUntilSettled() {
   var n = 0;
   _poll?.cancel();
   _poll = Timer.periodic(const Duration(seconds: 2), (t) {
@@ -62,6 +50,38 @@ void _checkOnce() {
       _apply(m);
     }
   });
+}
+
+void _checkOnce() {
+  final m = _state();
+  final phase = (m['phase'] ?? 'idle').toString();
+  // 只在空闲或已是最新时自动检查；正在检查/下载/安装、已发现新版本、
+  // 或安装失败等待用户重试（error 保留清单）时都不打断。
+  if (phase == 'checking') {
+    _pollUntilSettled();
+    return;
+  }
+  if (phase != 'idle' && phase != 'latest') {
+    _apply(m);
+    return;
+  }
+  try {
+    bind.mainVegaUpdateCheck();
+  } catch (_) {
+    return;
+  }
+  _pollUntilSettled();
+}
+
+/// 「关于」页手动检查得到结果时同步给首页提示条。
+void vegaSyncUpdateNotice(String phase, String version, String notes) {
+  if (phase == 'available') {
+    vegaUpdateAvailable.value = version;
+    vegaUpdateNotes.value = notes;
+  } else if (phase == 'latest') {
+    vegaUpdateAvailable.value = '';
+    vegaUpdateNotes.value = '';
+  }
 }
 
 /// 主窗口启动后调用一次：12 秒后检查，之后每 6 小时检查一次。仅 Windows。
@@ -90,7 +110,8 @@ class VegaUpdateBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Obx(() {
       final v = vegaUpdateAvailable.value;
-      if (v.isEmpty) return const SizedBox.shrink();
+      // 设置被禁用时不提供入口（与侧栏一致）。
+      if (v.isEmpty || bind.isDisableSettings()) return const SizedBox.shrink();
       final p = VegaColors.of(context);
       final firstNote = vegaUpdateNotes.value
           .split('\n')
