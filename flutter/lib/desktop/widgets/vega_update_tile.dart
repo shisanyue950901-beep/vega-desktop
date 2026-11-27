@@ -34,7 +34,8 @@ class _VegaUpdateTileState extends State<VegaUpdateTile> {
   @override
   void initState() {
     super.initState();
-    _readPending();
+    // 锁定卡里不读取上次安装结果：后端读取即删除，留给「关于」页显示。
+    if (!widget.checkOnly) _readPending();
     _readState();
   }
 
