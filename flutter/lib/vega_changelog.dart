@@ -9,6 +9,9 @@ class VegaRelease {
 }
 
 const List<VegaRelease> vegaChangelog = [
+  VegaRelease('0.7.4', '2026-11-27', [
+    '被远程控制时也能在锁定提示卡里检查更新；安装需断开远程后进行',
+  ]),
   VegaRelease('0.7.3', '2026-11-26', [
     '被远程控制时，设置页的黑色遮罩换成锁定提示卡，说明为何锁定以及如何开放远程修改',
   ]),
